@@ -70,3 +70,9 @@ app.py
 - Todas as chaves CSS foram escapadas corretamente.
 - Escopo funcional permanece igual: 10 grupos e 26 alavancas.
 - Nenhuma regra de negócio do simulador foi removida.
+
+
+## Hotfix v0.6.2.2
+- Menu lateral totalmente alinhado à esquerda.
+- Texto e conteúdo interno dos botões agora usam justify-content:flex-start e text-align:left.
+- Mantido o destaque azul/cyan do item ativo.
