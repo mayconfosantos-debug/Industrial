@@ -380,7 +380,9 @@ SHEETS = {
     "manutencao":["manutencao","manutenção","maintenance"],
     "pessoas":["pessoas","people","mao_de_obra","mão de obra"],
     "custos":["custos","costs","financeiro"],
-    "metas":["metas","targets","goals"]
+    "metas":["metas","targets","goals"],
+    "padroes_produto":["padroes_produto","padrões_produto","padroes","product_standards","standards"],
+    "parametros_diagnostico":["parametros_diagnostico","parametros_diagnóstico","diagnostico_parametros","diagnostic_parameters"]
 }
 ALIASES = {
     "producao":{
@@ -417,7 +419,35 @@ ALIASES = {
         "custo_fixo":["custo_fixo","fixed_cost","custos_fixos"],
         "receita":["receita","faturamento","revenue"]
     },
-    "metas":{"indicador":["indicador","kpi","metric"],"meta":["meta","target","goal"]}
+    "metas":{
+        "indicador":["indicador","kpi","metric"],"meta":["meta","target","goal"],
+        "direcao":["direcao","direção","direction"],"unidade":["unidade","unit"],
+        "obrigatoria":["obrigatoria","obrigatória","mandatory"],
+        "referencia_financeira":["referencia_financeira","referência_financeira","financial_reference"]
+    },
+    "padroes_produto":{
+        "produto":["produto","sku","product"],"familia":["familia","família","family"],
+        "linha_padrao":["linha_padrao","linha_padrão","standard_line"],
+        "tempo_ciclo_padrao_min_un":["tempo_ciclo_padrao_min_un","tempo_ciclo_padrão_min_un","standard_cycle_min_unit"],
+        "operadores_padrao":["operadores_padrao","operadores_padrão","standard_operators"],
+        "hh_padrao_un":["hh_padrao_un","hh_padrão_un","standard_labor_hours_unit"],
+        "tempo_setup_padrao_min_lote":["tempo_setup_padrao_min_lote","tempo_setup_padrão_min_lote","standard_setup_min_batch"],
+        "lote_padrao_un":["lote_padrao_un","lote_padrão_un","standard_batch"],
+        "mp_padrao_kg_un":["mp_padrao_kg_un","mp_padrão_kg_un","standard_material_kg_unit"],
+        "energia_padrao_kwh_un":["energia_padrao_kwh_un","energia_padrão_kwh_un","standard_energy_kwh_unit"],
+        "custo_hh_mod":["custo_hh_mod","custo_hh_mod_r","labor_hour_cost"],
+        "preco_liquido_padrao":["preco_liquido_padrao","preço_liquido_padrão","standard_net_price"],
+        "custo_variavel_padrao":["custo_variavel_padrao","custo_variável_padrão","standard_variable_cost"],
+        "margem_contrib_padrao":["margem_contrib_padrao","margem_contrib_padrão","standard_contribution_margin"]
+    },
+    "parametros_diagnostico":{
+        "alavanca":["alavanca","lever"],
+        "esforco_1a5":["esforco_1a5","esforço_1a5","effort"],
+        "horizonte_dias":["horizonte_dias","horizon_days"],
+        "responsavel_tipico":["responsavel_tipico","responsável_típico","typical_owner"],
+        "tipo_impacto":["tipo_impacto","impact_type"],
+        "peso_minimo_gestao":["peso_minimo_gestao","peso_mínimo_gestão","minimum_management_weight"]
+    }
 }
 
 def canonical_sheet(name):
@@ -444,28 +474,39 @@ def parse_excel(raw):
             data[canon]=rename_cols(df,canon)
 
     required={
-        "producao":["data","linha","planejado","realizado","horas_disponiveis","horas_paradas","velocidade_real","velocidade_nominal"],
-        "qualidade":["data","linha","produzido","aprovado","refugo"],
+        "producao":["data","linha","produto","planejado","realizado","horas_disponiveis","horas_paradas","velocidade_real","velocidade_nominal"],
+        "qualidade":["data","linha","produto","produzido","aprovado","refugo"],
         "manutencao":["data","linha","maquina","duracao_horas","causa"],
         "pessoas":["data","linha","horas_normais","horas_extras"],
         "custos":["data","linha","custo_mp","custo_mod","custo_energia","custo_manutencao","receita"],
+        "metas":["indicador","meta"],
+        "padroes_produto":["produto"]
     }
     issues=[]
     for sh, cols in required.items():
         if sh not in data:
-            issues.append(f"Aba ausente: {sh.title()}")
+            issues.append(f"Aba ausente: {sh.title().replace('_',' ')}")
         else:
             miss=[c for c in cols if c not in data[sh].columns]
             if miss:
-                issues.append(f"{sh.title()}: faltam {', '.join(miss)}")
+                issues.append(f"{sh.title().replace('_',' ')}: faltam {', '.join(miss)}")
+
+    if "padroes_produto" in data:
+        pp=data["padroes_produto"]
+        has_hh="hh_padrao_un" in pp.columns
+        has_cycle=("tempo_ciclo_padrao_min_un" in pp.columns and "operadores_padrao" in pp.columns)
+        if not has_hh and not has_cycle:
+            issues.append("Padroes Produto: informar HH_Padrao_un ou Tempo_Ciclo_Padrao_min_un + Operadores_Padrao")
+
     if issues:
         return None, issues
+
     for _,df in data.items():
         if "data" in df.columns:
             df["data"]=pd.to_datetime(df["data"],errors="coerce")
     return data, []
 
-def target_from(data, names, default):
+def target_from(data, names, default=np.nan):
     m=data.get("metas")
     if m is None or m.empty or "indicador" not in m or "meta" not in m:
         return default
@@ -477,17 +518,64 @@ def target_from(data, names, default):
     v=pd.to_numeric(hit.iloc[0]["meta"],errors="coerce")
     return float(v) if pd.notna(v) else default
 
+def _status_points(score, has_target=True, has_data=True):
+    # KPI sem meta ou sem dado não é ignorado: penaliza governança.
+    if not has_target or not has_data or score is None or pd.isna(score):
+        return 25.0
+    if score >= 0:
+        return 100.0
+    if score >= -0.01:
+        return 90.0
+    if score >= -0.10:
+        # -1% => 90 ; -10% => 55
+        return 90 - ((abs(score)-0.01)/0.09)*35
+    # abaixo de -10% cai rapidamente
+    return max(0.0, 55 - (abs(score)-0.10)*180)
+
+def _effort_parameters(data):
+    defaults={
+        "Disponibilidade":(4,60,"Manutenção"),
+        "Performance":(3,45,"Produção / Processos"),
+        "Setup":(2,30,"Engenharia de Processos"),
+        "Refugo":(3,45,"Qualidade / Processos"),
+        "Eficiência MOD":(3,45,"Produção / Engenharia"),
+        "Horas extras":(2,30,"Produção"),
+        "Consumo MP":(3,45,"Processos / Suprimentos"),
+        "Energia":(3,60,"Utilidades / Engenharia"),
+        "Custo fixo":(4,90,"Diretor Industrial / CFO"),
+        "OTIF":(3,45,"PCP / Logística"),
+    }
+    prm=data.get("parametros_diagnostico")
+    if prm is None or prm.empty or "alavanca" not in prm.columns:
+        return defaults
+    out=defaults.copy()
+    for _,r in prm.iterrows():
+        key=str(r.get("alavanca","")).strip()
+        if not key:
+            continue
+        effort=pd.to_numeric(r.get("esforco_1a5",np.nan),errors="coerce")
+        horizon=pd.to_numeric(r.get("horizonte_dias",np.nan),errors="coerce")
+        owner=str(r.get("responsavel_tipico","")).strip()
+        old=out.get(key,(3,45,"Gestão"))
+        out[key]=(int(effort) if pd.notna(effort) else old[0],
+                  int(horizon) if pd.notna(horizon) else old[1],
+                  owner if owner else old[2])
+    return out
+
 def calculate_real(data):
     p=data["producao"].copy()
     q=data["qualidade"].copy()
     m=data["manutencao"].copy()
     pe=data["pessoas"].copy()
     c=data["custos"].copy()
+    std=data.get("padroes_produto",pd.DataFrame()).copy()
 
     for col in ["planejado","realizado","horas_disponiveis","horas_paradas","velocidade_real","velocidade_nominal"]:
         p[col]=nseries(p[col])
     for col in ["produzido","aprovado","refugo"]:
         q[col]=nseries(q[col])
+    if "retrabalho" in q.columns:
+        q["retrabalho"]=nseries(q["retrabalho"])
     m["duracao_horas"]=nseries(m["duracao_horas"])
     for col in ["horas_normais","horas_extras"]:
         pe[col]=nseries(pe[col])
@@ -495,6 +583,7 @@ def calculate_real(data):
         c[col]=nseries(c[col])
     c["custo_fixo"]=nseries(c["custo_fixo"]) if "custo_fixo" in c.columns else 0
 
+    # ---------------- Basic operation ----------------
     planned=p["planejado"].sum()
     actual=p["realizado"].sum()
     attainment=safe_div(actual,planned)
@@ -507,6 +596,7 @@ def calculate_real(data):
     oee=availability*min(performance,1)*quality
     scrap=safe_div(q["refugo"].sum(),q["produzido"].sum())
 
+    # ---------------- Finance ----------------
     var_cost=c[["custo_mp","custo_mod","custo_energia","custo_manutencao"]].sum().sum()
     fixed_cost=c["custo_fixo"].sum()
     revenue=c["receita"].sum()
@@ -517,13 +607,47 @@ def calculate_real(data):
     cost_unit=safe_div(total_cost,actual)
 
     overtime=pe["horas_extras"].sum()
-    hours=pe["horas_normais"].sum()+overtime
-    productivity=safe_div(actual,hours)
+    actual_hh=pe["horas_normais"].sum()+overtime
+    productivity_raw=safe_div(actual,actual_hh)
 
+    # ---------------- Mix linearization / labor efficiency ----------------
+    labor_eff=np.nan
+    std_hours_earned=np.nan
+    standards_missing=[]
+    labor_gap_cost=0.0
+    if std is not None and not std.empty and "produto" in std.columns:
+        if "hh_padrao_un" not in std.columns:
+            std["hh_padrao_un"]=np.nan
+        std["hh_padrao_un"]=pd.to_numeric(std["hh_padrao_un"],errors="coerce")
+        if "tempo_ciclo_padrao_min_un" in std.columns and "operadores_padrao" in std.columns:
+            cyc=pd.to_numeric(std["tempo_ciclo_padrao_min_un"],errors="coerce")
+            ops=pd.to_numeric(std["operadores_padrao"],errors="coerce")
+            calc_hh=cyc/60*ops
+            std["hh_padrao_un"]=std["hh_padrao_un"].fillna(calc_hh)
+        good=q.groupby("produto",as_index=False)["aprovado"].sum()
+        merge=good.merge(std[["produto","hh_padrao_un"]],on="produto",how="left")
+        standards_missing=merge.loc[merge["hh_padrao_un"].isna(),"produto"].astype(str).tolist()
+        if not merge.empty and len(standards_missing)==0:
+            std_hours_earned=float((merge["aprovado"]*merge["hh_padrao_un"]).sum())
+            labor_eff=safe_div(std_hours_earned,actual_hh)
+            labor_rate=safe_div(c["custo_mod"].sum(),actual_hh)
+            labor_gap_cost=max(0,actual_hh-std_hours_earned)*labor_rate
+
+    # ---------------- Targets ----------------
+    t_prod=target_from(data,["Atingimento Produção","Produção"],1.0)
     t_oee=target_from(data,["OEE"],0.78)
+    t_avail=target_from(data,["Disponibilidade"],0.82)
+    t_perf=target_from(data,["Performance"],0.97)
+    t_quality=target_from(data,["Qualidade"],0.985)
+    t_labor=target_from(data,["Eficiência MOD","Eficiencia MOD"],0.95)
     t_scrap=target_from(data,["Refugo","Taxa Refugo"],0.025)
+    t_otif=target_from(data,["OTIF"],np.nan)
+    t_cost=target_from(data,["Custo/unidade","Custo por unidade"],np.nan)
+    t_overtime=target_from(data,["Horas extras"],np.nan)
     t_margin=target_from(data,["Margem","Margem Contribuição"],0.31)
+    t_ebitda=target_from(data,["EBITDA Industrial","EBITDA"],np.nan)
 
+    # ---------------- Trends / line view ----------------
     trend=p.groupby("data",as_index=False)[["planejado","realizado"]].sum().dropna().sort_values("data")
     if len(trend)>35:
         trend=trend.tail(35)
@@ -549,18 +673,37 @@ def calculate_real(data):
     causes=m.groupby("causa",as_index=False)["duracao_horas"].sum().rename(columns={"duracao_horas":"Horas"})
     if not causes.empty:
         margin_unit=safe_div(contrib,actual)
-        units_h=safe_div(actual,max(1,hours))
+        units_h=safe_div(actual,max(1,actual_hh))
         causes["Impacto R$ mil"]=causes["Horas"]*units_h*margin_unit/1000
-        causes=causes.sort_values("Horas",ascending=False).head(6)
+        causes=causes.sort_values("Horas",ascending=False).head(8)
+
+    # ---------------- Unique financial impact buckets (avoid double count) ----------------
+    margin_unit=safe_div(contrib,max(1,actual))
+    loss_prod=max(0,planned-actual)*margin_unit
+    loss_scrap=q["refugo"].sum()*safe_div(total_cost,max(1,actual))
+    overtime_premium=max(0,overtime-(t_overtime if pd.notna(t_overtime) else 0))*30 if pd.notna(t_overtime) else overtime*30
+    cost_gap=max(0,cost_unit-t_cost)*actual if pd.notna(t_cost) else max(0,total_cost*0.015)
+    energy_gap=max(0,c["custo_energia"].sum()*0.05)
+    impacts=pd.DataFrame({
+        "Impacto":["Gap de volume","Refugo","Eficiência MOD","Horas extras","Custo / consumo"],
+        "R$":[loss_prod,loss_scrap,labor_gap_cost,overtime_premium,cost_gap]
+    }).sort_values("R$",ascending=False)
+
+    # ---------------- KPIs: raw units/h no longer used as consolidated productivity ----------------
+    labor_has_data=pd.notna(labor_eff)
+    labor_score=(safe_div(labor_eff,t_labor)-1) if labor_has_data and pd.notna(t_labor) else np.nan
+    labor_mes=fmt_pct(labor_eff) if labor_has_data else "Padrão ausente"
+    labor_delta=(f"{(labor_eff-t_labor)*100:+.1f} pp".replace(".",",")
+                 if labor_has_data and pd.notna(t_labor) else "cadastro incompleto")
 
     kpis=[
         ("Produção",f"{actual:,.0f} un".replace(",","."),f"{planned:,.0f}".replace(",","."),attainment-1,f"{attainment-1:+.1%}".replace(".",","),"↓" if attainment<1 else "↑"),
         ("OEE",fmt_pct(oee),fmt_pct(t_oee),safe_div(oee,t_oee)-1,f"{(oee-t_oee)*100:+.1f} pp".replace(".",","),"↓" if oee<t_oee else "↑"),
-        ("Produtividade",f"{productivity:.1f} un/h".replace(".",","),"—",0,"—","→"),
+        ("Eficiência MOD",labor_mes,fmt_pct(t_labor) if pd.notna(t_labor) else "Meta ausente",labor_score,labor_delta,"!" if not labor_has_data else ("↓" if labor_eff<t_labor else "↑")),
         ("Refugo",fmt_pct(scrap),fmt_pct(t_scrap),1-safe_div(scrap,t_scrap),f"{(scrap-t_scrap)*100:+.1f} pp".replace(".",","),"↑" if scrap>t_scrap else "↓"),
-        ("OTIF","—","—",0,"—","→"),
-        ("Custo/unidade",fmt_money(cost_unit,2),"—",0,"—","→"),
-        ("Horas extras",f"{overtime:,.0f} h".replace(",","."),"—",0,"—","→"),
+        ("OTIF","—",fmt_pct(t_otif) if pd.notna(t_otif) else "Meta ausente",np.nan,"sem dado","!"),
+        ("Custo/unidade",fmt_money(cost_unit,2),fmt_money(t_cost,2) if pd.notna(t_cost) else "Meta ausente",(1-safe_div(cost_unit,t_cost)) if pd.notna(t_cost) else np.nan,(f"{safe_div(cost_unit,t_cost)-1:+.1%}".replace(".",",") if pd.notna(t_cost) else "sem meta"),"↑" if pd.notna(t_cost) and cost_unit>t_cost else "→"),
+        ("Horas extras",f"{overtime:,.0f} h".replace(",","."),f"{t_overtime:,.0f} h".replace(",",".") if pd.notna(t_overtime) else "Meta ausente",(1-safe_div(overtime,t_overtime)) if pd.notna(t_overtime) else np.nan,(f"{safe_div(overtime,t_overtime)-1:+.1%}".replace(".",",") if pd.notna(t_overtime) else "sem meta"),"↑" if pd.notna(t_overtime) and overtime>t_overtime else "→"),
         ("Margem contribuição",fmt_pct(margin_contrib),fmt_pct(t_margin),safe_div(margin_contrib,t_margin)-1,f"{(margin_contrib-t_margin)*100:+.1f} pp".replace(".",","),"↓" if margin_contrib<t_margin else "↑"),
     ]
 
@@ -568,19 +711,100 @@ def calculate_real(data):
     cards=[
         ("Receita Líquida",fmt_money(revenue),attainment-1,f"{attainment-1:+.1%} vs. plano".replace(".",",")),
         ("Margem Contrib.",fmt_pct(margin_contrib),margin_score,f"{(margin_contrib-t_margin)*100:+.1f} pp vs. meta".replace(".",",")),
-        ("EBITDA Industrial",fmt_money(ebitda),margin_score,f"{margin_score:+.1%} vs. ref.".replace(".",",")),
+        ("EBITDA Industrial",fmt_money(ebitda),(safe_div(ebitda,t_ebitda)-1) if pd.notna(t_ebitda) else margin_score,(f"{safe_div(ebitda,t_ebitda)-1:+.1%} vs. meta".replace(".",",") if pd.notna(t_ebitda) else "meta financeira")),
         ("Produção",f"{actual:,.0f} un".replace(",","."),attainment-1,f"{attainment-1:+.1%} vs. meta".replace(".",",")),
         ("OEE",fmt_pct(oee),safe_div(oee,t_oee)-1,f"{(oee-t_oee)*100:+.1f} pp vs. meta".replace(".",",")),
-        ("Custo / un.",fmt_money(cost_unit,2),0,"calculado no período"),
+        ("Custo / un.",fmt_money(cost_unit,2),(1-safe_div(cost_unit,t_cost)) if pd.notna(t_cost) else np.nan,(f"{safe_div(cost_unit,t_cost)-1:+.1%} vs. meta".replace(".",",") if pd.notna(t_cost) else "meta não definida")),
     ]
 
-    loss_prod=max(0,planned-actual)*safe_div(contrib,max(1,actual))
-    loss_scrap=q["refugo"].sum()*safe_div(total_cost,max(1,actual))
-    loss_down=m["duracao_horas"].sum()*safe_div(actual,max(1,hours))*safe_div(contrib,max(1,actual))
-    impacts=pd.DataFrame({
-        "Impacto":["Gap de produção","Refugo","Paradas","Horas extras","Consumo / mix"],
-        "R$":[loss_prod,loss_scrap,loss_down,overtime*30,max(0,total_cost*0.015)]
-    }).sort_values("R$",ascending=False)
+    # ---------------- Health: all KPIs count; finance increases relevance weight ----------------
+    financial_relevance={
+        "Produção":loss_prod,
+        "OEE":loss_prod*0.70,  # relevance signal, not additive impact
+        "Eficiência MOD":labor_gap_cost,
+        "Refugo":loss_scrap,
+        "OTIF":revenue*0.01,
+        "Custo/unidade":cost_gap,
+        "Horas extras":overtime_premium,
+        "Margem contribuição":max(0,(t_margin-margin_contrib)*revenue)
+    }
+    max_rel=max([v for v in financial_relevance.values() if pd.notna(v)] + [1])
+    health_rows=[]
+    for ind,mes,meta,score,delta,tend in kpis:
+        has_target=("Meta ausente" not in str(meta))
+        has_data=(mes not in ["—","Padrão ausente"])
+        pts=_status_points(score,has_target,has_data)
+        rel=max(0,financial_relevance.get(ind,0))
+        weight=1.0 + 2.0*(rel/max_rel)  # all KPIs count; financial relevance can triple weight
+        health_rows.append([ind,pts,weight,rel,has_target,has_data])
+    health_df=pd.DataFrame(health_rows,columns=["KPI","Score","Peso","Relevancia_R$","Tem_Meta","Tem_Dado"])
+    health_score=float(np.average(health_df["Score"],weights=health_df["Peso"]))
+
+    financial_names=["Produção","Refugo","Custo/unidade","Horas extras","Margem contribuição","Eficiência MOD"]
+    hfin=health_df[health_df["KPI"].isin(financial_names)]
+    financial_health=float(np.average(hfin["Score"],weights=hfin["Peso"])) if not hfin.empty else health_score
+    operational_names=["Produção","OEE","Eficiência MOD","Refugo","OTIF"]
+    hop=health_df[health_df["KPI"].isin(operational_names)]
+    operational_health=float(np.average(hop["Score"],weights=hop["Peso"])) if not hop.empty else health_score
+
+    # ---------------- Diagnostic engine ----------------
+    effort=_effort_parameters(data)
+    worst_line=line_perf.sort_values("OEE").iloc[0] if not line_perf.empty else None
+    top_cause=causes.iloc[0] if not causes.empty else None
+
+    lever_impacts={
+        "Disponibilidade":loss_prod*0.45,
+        "Performance":loss_prod*0.25,
+        "Setup":loss_prod*0.12,
+        "Refugo":loss_scrap,
+        "Eficiência MOD":labor_gap_cost,
+        "Horas extras":overtime_premium,
+        "Consumo MP":cost_gap*0.70,
+        "Energia":energy_gap,
+        "Custo fixo":max(0,fixed_cost*0.03),
+        "OTIF":revenue*0.005
+    }
+    action_library={
+        "Disponibilidade":"Plano de confiabilidade nos equipamentos críticos; revisar preventiva, sobressalentes e reincidências.",
+        "Performance":"Atacar microparadas e perdas de velocidade; revisar padrão operacional e parâmetros de processo.",
+        "Setup":"Aplicar SMED, preparação externa e sequenciamento por família para reduzir troca.",
+        "Refugo":"Pareto por produto/causa; revisar parâmetros, matéria-prima, inspeção e estabilidade do processo.",
+        "Eficiência MOD":"Rebalancear células/turnos usando HH padrão por produto; atacar esperas, movimentação e desequilíbrio.",
+        "Horas extras":"Revisar dimensionamento, escala, restrições de capacidade e relação hora extra × volume incremental.",
+        "Consumo MP":"Comparar consumo real versus padrão por produto; investigar rendimento, perdas e variação de processo.",
+        "Energia":"Medir kWh por unidade equivalente e atacar equipamentos/processos fora do padrão.",
+        "Custo fixo":"Revisar estrutura, contratos e capacidade ociosa; separar custo estrutural de custo necessário ao crescimento.",
+        "OTIF":"Atacar aderência ao plano, disponibilidade de material e gargalos de expedição/PCP."
+    }
+    diag_rows=[]
+    max_impact=max(list(lever_impacts.values())+[1])
+    for lever,impact in lever_impacts.items():
+        ef,horizon,owner=effort.get(lever,(3,45,"Gestão"))
+        result_score=impact/max_impact*100
+        priority_score=result_score/max(1,ef)
+        if priority_score>=22:
+            priority="Prioridade 1"
+        elif priority_score>=10:
+            priority="Prioridade 2"
+        else:
+            priority="Prioridade 3"
+        diag_rows.append([lever,impact,ef,horizon,owner,result_score,priority_score,priority,action_library[lever]])
+    diagnostic=pd.DataFrame(diag_rows,columns=[
+        "Alavanca","Impacto_R$","Esforco","Horizonte_dias","Responsavel","Resultado_0a100",
+        "Indice_Prioridade","Prioridade","Acao"
+    ]).sort_values(["Indice_Prioridade","Impacto_R$"],ascending=False)
+
+    top2=diagnostic.head(2)["Alavanca"].tolist()
+    conclusion=(
+        f"A operação fechou em {attainment:.1%} do plano, com OEE de {oee:.1%} e margem de contribuição de {margin_contrib:.1%}. "
+        f"A saúde consolidada está em {health_score:.0f}/100 e a saúde financeira em {financial_health:.0f}/100. "
+    )
+    if worst_line is not None:
+        conclusion += f"A linha mais crítica é {worst_line['Linha']} (OEE {worst_line['OEE']:.1%}). "
+    if top_cause is not None:
+        conclusion += f"A principal causa de parada é {top_cause['Causa']} ({top_cause['Horas']:.0f} h). "
+    if top2:
+        conclusion += "As alavancas a priorizar são " + " e ".join(top2) + "."
 
     dre=pd.DataFrame({
         "Linha":["Receita Líquida","(-) Custos Variáveis","Margem de Contribuição","(-) Custos Fixos","EBITDA Industrial"],
@@ -594,7 +818,12 @@ def calculate_real(data):
         "attainment":attainment,"margin":margin_contrib,"target_margin":t_margin,
         "ebitda":ebitda,"revenue":revenue,"actual":actual,"planned":planned,
         "availability":availability,"performance":performance,"quality":quality,
-        "cost_unit":cost_unit,"overtime":overtime,"productivity":productivity
+        "cost_unit":cost_unit,"overtime":overtime,"productivity":productivity_raw,
+        "labor_efficiency":labor_eff,"std_hours_earned":std_hours_earned,"actual_hh":actual_hh,
+        "standards_missing":standards_missing,
+        "health_score":health_score,"financial_health":financial_health,"operational_health":operational_health,
+        "health_details":health_df,
+        "diagnostic":diagnostic,"diagnostic_conclusion":conclusion
     }
 
 def demo_dataset():
@@ -626,18 +855,40 @@ def demo_dataset():
     kpis=[
         ("Produção","41.250 un","45.000",-0.083,"-8,3%","↓"),
         ("OEE","71,4%","78%",-0.0846,"-6,6 pp","↓"),
-        ("Produtividade","18,2 un/h","19,5",-0.067,"-6,7%","→"),
+        ("Eficiência MOD","89,8%","95%",-0.055,"-5,2 pp","↓"),
         ("Refugo","3,8%","2,5%",-0.52,"+1,3 pp","↑"),
         ("OTIF","89%","95%",-0.063,"-6 pp","↓"),
         ("Custo/unidade","R$ 18,42","R$ 17,10",-0.077,"+7,7%","↑"),
         ("Horas extras","1.280 h","900 h",-0.422,"+42%","↑"),
         ("Margem contribuição","27,8%","31%",-0.103,"-3,2 pp","↓"),
     ]
-    impacts=pd.DataFrame({"Impacto":["Menor volume","Refugo","Horas extras","Manutenção","Consumo MP"],"R$":[220000,110000,95000,75000,48000]})
+    impacts=pd.DataFrame({
+        "Impacto":["Gap de volume","Refugo","Eficiência MOD","Horas extras","Custo / consumo"],
+        "R$":[220000,110000,84000,75000,48000]
+    })
     dre=pd.DataFrame({
         "Linha":["Receita Líquida","(-) Custos Variáveis","Margem de Contribuição","(-) Custos Fixos","EBITDA Industrial"],
         "Realizado":[12400000,-8950000,3450000,-1550000,1900000]
     })
+    health_details=pd.DataFrame([
+        ["Produção",72,3.0,220000,True,True],
+        ["OEE",67,2.4,154000,True,True],
+        ["Eficiência MOD",72,1.8,84000,True,True],
+        ["Refugo",20,2.0,110000,True,True],
+        ["OTIF",70,1.2,50000,True,True],
+        ["Custo/unidade",68,1.6,95000,True,True],
+        ["Horas extras",0,1.5,75000,True,True],
+        ["Margem contribuição",50,2.2,397000,True,True],
+    ],columns=["KPI","Score","Peso","Relevancia_R$","Tem_Meta","Tem_Dado"])
+    diagnostic=pd.DataFrame([
+        ["Setup",96000,2,30,"Engenharia de Processos",31,15.5,"Prioridade 2","Aplicar SMED e preparação externa."],
+        ["Refugo",214000,3,45,"Qualidade / Processos",69,23.0,"Prioridade 1","Pareto por produto/causa e revisão de parâmetros."],
+        ["Disponibilidade",312000,4,60,"Manutenção",100,25.0,"Prioridade 1","Plano de confiabilidade na Linha 3 / MX-04."],
+        ["Eficiência MOD",84000,3,45,"Produção / Engenharia",27,9.0,"Prioridade 3","Rebalancear células usando HH padrão por produto."],
+        ["Horas extras",88000,2,30,"Produção",28,14.0,"Prioridade 2","Revisar escala, gargalos e capacidade."],
+        ["Consumo MP",72000,3,45,"Processos / Suprimentos",23,7.7,"Prioridade 3","Comparar consumo real x padrão e atacar rendimento."],
+    ],columns=["Alavanca","Impacto_R$","Esforco","Horizonte_dias","Responsavel","Resultado_0a100","Indice_Prioridade","Prioridade","Acao"]).sort_values("Indice_Prioridade",ascending=False)
+
     return {
         "cards":cards,"kpis":kpis,"trend":trend,"line_perf":line_perf,"causes":causes,"impacts":impacts,
         "dre":dre,"cost_structure":{"Variável":8950000,"Fixo":1550000},
@@ -645,7 +896,13 @@ def demo_dataset():
         "attainment":.917,"margin":.278,"target_margin":.31,
         "ebitda":1900000,"revenue":12400000,"actual":41250,"planned":45000,
         "availability":.748,"performance":.945,"quality":.981,
-        "cost_unit":18.42,"overtime":1280,"productivity":18.2
+        "cost_unit":18.42,"overtime":1280,"productivity":18.2,
+        "labor_efficiency":.898,"std_hours_earned":12120,"actual_hh":13497,
+        "standards_missing":[],
+        "health_score":55,"financial_health":49,"operational_health":61,
+        "health_details":health_details,
+        "diagnostic":diagnostic,
+        "diagnostic_conclusion":"A fábrica fechou em 91,7% do plano, com OEE de 71,4% e margem de contribuição de 27,8%. A saúde consolidada está em 55/100 e a saúde financeira em 49/100. A Linha 3 é a mais crítica (OEE 64%). A principal causa de parada é Falha mecânica (58 h). As alavancas a priorizar são Disponibilidade e Refugo."
     }
 
 def kpi_card(label,value,score,delta):
@@ -788,34 +1045,32 @@ if page == "Cockpit Executivo":
 
     with right:
         with st.container(border=True):
-            panel_title("Saúde da Fábrica","Status consolidado dos KPIs")
-            scores = [x[3] for x in D["kpis"]]
-            green_count = sum(1 for s in scores if s >= 0)
-            orange_count = sum(1 for s in scores if -0.10 <= s < 0)
-            red_count = sum(1 for s in scores if s < -0.10)
-            total = max(1, len(scores))
+            panel_title("Saúde de Performance","Score ponderado por relevância financeira")
+            h=D["health_score"]
+            hcolor=GREEN if h>=75 else ORANGE if h>=55 else RED
             fig = go.Figure(go.Pie(
-                labels=["Em linha","Atenção","Crítico"],
-                values=[green_count, orange_count, red_count],
-                hole=.74,
-                marker=dict(colors=[GREEN,ORANGE,RED],line=dict(width=0)),
+                labels=["Score","Gap"],
+                values=[h,max(0,100-h)],
+                hole=.76,
+                marker=dict(colors=[hcolor,"#E8EEF4"],line=dict(width=0)),
                 textinfo="none",
-                hovertemplate="%{label}: %{value}<extra></extra>"
+                hoverinfo="skip"
             ))
-            pct = int(round(green_count / total * 100))
             fig.update_layout(
-                height=210,margin=dict(l=0,r=0,t=0,b=0),showlegend=False,
+                height=190,margin=dict(l=0,r=0,t=0,b=0),showlegend=False,
                 paper_bgcolor="rgba(0,0,0,0)",
-                annotations=[dict(text=f"<b>{pct}%</b><br><span style='font-size:10px'>em linha</span>",
+                annotations=[dict(text=f"<b>{h:.0f}/100</b><br><span style='font-size:9px'>saúde geral</span>",
                                   x=.5,y=.5,showarrow=False,font=dict(size=16,color=TEXT))]
             )
             st.plotly_chart(fig, use_container_width=True, config={"displayModeBar":False})
             st.markdown(
-                f"<div class='small'><span class='dot' style='background:{GREEN}'></span>{green_count} em linha&nbsp;&nbsp;"
-                f"<span class='dot' style='background:{ORANGE}'></span>{orange_count} atenção&nbsp;&nbsp;"
-                f"<span class='dot' style='background:{RED}'></span>{red_count} crítico</div>",
+                f"<div style='display:flex;justify-content:space-between;font-size:.60rem'>"
+                f"<span>Operacional <b>{D['operational_health']:.0f}</b></span>"
+                f"<span>Financeira <b>{D['financial_health']:.0f}</b></span></div>",
                 unsafe_allow_html=True
             )
+            with st.expander("Como o score é calculado"):
+                st.caption("Todos os KPIs críticos entram no score. KPI sem meta ou sem dado é penalizado como risco de gestão. O peso aumenta conforme a relevância financeira estimada em receita, margem, EBITDA ou caixa. A relevância usada no score não é somada ao DRE; o impacto financeiro aditivo evita dupla contagem entre causa e efeito.")
             st.write("")
             var = D["cost_structure"]["Variável"]
             fixed = D["cost_structure"]["Fixo"]
@@ -933,7 +1188,7 @@ elif page == "Performance Operacional":
     c1,c2,c3,c4 = st.columns(4, gap="small")
     c1.metric("OEE", fmt_pct(D["oee"]), f"{(D['oee']-D['target_oee'])*100:+.1f} pp".replace(".",","))
     c2.metric("Disponibilidade", fmt_pct(D["availability"]))
-    c3.metric("Performance", fmt_pct(D["performance"]))
+    c3.metric("Eficiência MOD", fmt_pct(D["labor_efficiency"]) if pd.notna(D["labor_efficiency"]) else "Padrão ausente", "mix linearizado")
     c4.metric("Qualidade", fmt_pct(D["quality"]))
 
     st.write("")
@@ -971,50 +1226,127 @@ elif page == "Performance Operacional":
     st.dataframe(lp, use_container_width=True, hide_index=True)
 
 elif page == "Diagnóstico e Causas":
-    page_header("Diagnóstico e Causas","Do desvio executivo à causa operacional.")
-    causes = D["causes"].copy()
-    if causes.empty:
-        st.info("Não há dados de causas suficientes para este período.")
-    else:
-        c1, c2 = st.columns(2, gap="small")
-        with c1:
-            with st.container(border=True):
-                panel_title("Pareto de Horas Perdidas","Principais causas de parada")
-                df = causes.sort_values("Horas")
-                fig = go.Figure(go.Bar(x=df["Horas"], y=df["Causa"], orientation="h", marker_color=BLUE,
-                                       text=[f"{x:.0f} h" for x in df["Horas"]], textposition="outside"))
-                fig.update_layout(height=300, margin=dict(l=0,r=55,t=8,b=0),
-                                  paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                                  xaxis=dict(showgrid=False,showticklabels=False), yaxis=dict(showgrid=False))
-                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar":False})
-        with c2:
-            with st.container(border=True):
-                panel_title("Impacto Financeiro por Causa","Estimativa gerencial")
-                df = causes.sort_values("Impacto R$ mil")
-                fig = go.Figure(go.Bar(x=df["Impacto R$ mil"], y=df["Causa"], orientation="h", marker_color="#E85B55",
-                                       text=[f"R$ {x:.0f} mil" for x in df["Impacto R$ mil"]], textposition="outside"))
-                fig.update_layout(height=300, margin=dict(l=0,r=75,t=8,b=0),
-                                  paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                                  xaxis=dict(showgrid=False,showticklabels=False), yaxis=dict(showgrid=False))
-                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar":False})
+    page_header("Diagnóstico e Causas","Raio-X da performance: desvio, causa, impacto financeiro e ação.")
+
+    diag=D["diagnostic"].copy()
+    causes=D["causes"].copy()
+    worst=D["line_perf"].sort_values("OEE").iloc[0] if not D["line_perf"].empty else None
+    top_lever=diag.iloc[0] if not diag.empty else None
+    top_cause=causes.iloc[0] if not causes.empty else None
+
+    # Executive X-ray
+    c1,c2,c3,c4=st.columns(4,gap="small")
+    c1.metric("Saúde Geral",f"{D['health_score']:.0f}/100",f"Financeira {D['financial_health']:.0f}/100")
+    c2.metric("Maior Alavanca",top_lever["Alavanca"] if top_lever is not None else "—",
+              fmt_money(top_lever["Impacto_R$"]) if top_lever is not None else "")
+    c3.metric("Linha Crítica",worst["Linha"] if worst is not None else "—",
+              f"OEE {fmt_pct(worst['OEE'])}" if worst is not None else "")
+    c4.metric("Causa Dominante",top_cause["Causa"] if top_cause is not None else "—",
+              f"{top_cause['Horas']:.0f} h" if top_cause is not None else "")
 
     st.write("")
     with st.container(border=True):
-        panel_title("Árvore de Diagnóstico","Encadeamento causal da performance")
-        st.markdown("""
-        <div style="font-size:.72rem;line-height:1.85;color:#34465C">
-            <b>Produção abaixo da meta</b>
-            &nbsp;→&nbsp; linha com maior gap
-            &nbsp;→&nbsp; componente OEE mais fraco
-            &nbsp;→&nbsp; equipamento / turno
-            &nbsp;→&nbsp; causa dominante
-            &nbsp;→&nbsp; <b>impacto financeiro</b>
-        </div>
-        """, unsafe_allow_html=True)
+        panel_title("Conclusão Executiva","Leitura automática dos principais sinais do período")
+        st.markdown(f"<div style='font-size:.76rem;line-height:1.6;color:#34465C'>{D['diagnostic_conclusion']}</div>",unsafe_allow_html=True)
+        if D.get("standards_missing"):
+            st.warning("Há produtos sem padrão cadastrado: " + ", ".join(D["standards_missing"]) + ". A eficiência MOD não deve ser usada até completar o cadastro.")
 
     st.write("")
-    if st.button("Criar plano de ação", type="primary"):
-        nav("Plano de Ação")
+    c1,c2=st.columns([1.08,.92],gap="small")
+
+    with c1:
+        with st.container(border=True):
+            panel_title("Matriz Esforço x Resultado","Priorize alto impacto com menor esforço")
+            if not diag.empty:
+                colors=[GREEN if p=="Prioridade 1" else ORANGE if p=="Prioridade 2" else "#AAB7C4" for p in diag["Prioridade"]]
+                fig=go.Figure(go.Scatter(
+                    x=diag["Esforco"], y=diag["Impacto_R$"],
+                    mode="markers+text",
+                    text=diag["Alavanca"], textposition="top center",
+                    marker=dict(
+                        size=np.clip(diag["Resultado_0a100"]/2+18,18,52),
+                        color=colors, opacity=.82,
+                        line=dict(width=1.5,color="white")
+                    ),
+                    customdata=np.stack([diag["Horizonte_dias"],diag["Responsavel"],diag["Prioridade"]],axis=-1),
+                    hovertemplate="<b>%{text}</b><br>Esforço: %{x}/5<br>Impacto: R$ %{y:,.0f}<br>Horizonte: %{customdata[0]} dias<br>%{customdata[2]}<extra></extra>"
+                ))
+                fig.update_xaxes(range=[0.5,5.5],dtick=1,title="Esforço (1 = baixo | 5 = alto)",gridcolor="#EFF3F7")
+                fig.update_yaxes(title="Impacto potencial (R$)",gridcolor="#EFF3F7",tickformat=",.0f")
+                fig.update_layout(height=355,margin=dict(l=10,r=10,t=20,b=35),
+                                  paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="rgba(0,0,0,0)",
+                                  showlegend=False)
+                st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
+
+    with c2:
+        with st.container(border=True):
+            panel_title("Prioridades Recomendadas","Ranking por resultado financeiro versus esforço")
+            show=diag.head(6)[["Alavanca","Impacto_R$","Esforco","Horizonte_dias","Prioridade"]].copy()
+            show["Impacto"]=show["Impacto_R$"].map(lambda x:fmt_money(x))
+            show=show.drop(columns=["Impacto_R$"])
+            st.dataframe(show,use_container_width=True,hide_index=True,height=300)
+
+    st.write("")
+    c1,c2=st.columns(2,gap="small")
+    with c1:
+        with st.container(border=True):
+            panel_title("Pareto de Causas","Horas perdidas e concentração")
+            if not causes.empty:
+                df=causes.sort_values("Horas")
+                fig=go.Figure(go.Bar(
+                    x=df["Horas"],y=df["Causa"],orientation="h",
+                    marker_color=BLUE,
+                    text=[f"{x:.0f} h" for x in df["Horas"]],textposition="outside"
+                ))
+                fig.update_layout(height=300,margin=dict(l=0,r=55,t=8,b=0),
+                                  paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="rgba(0,0,0,0)",
+                                  xaxis=dict(showgrid=False,showticklabels=False),
+                                  yaxis=dict(showgrid=False))
+                st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
+
+    with c2:
+        with st.container(border=True):
+            panel_title("Impacto Financeiro","Buckets sem dupla contagem")
+            imp=D["impacts"].sort_values("R$")
+            fig=go.Figure(go.Bar(
+                x=imp["R$"],y=imp["Impacto"],orientation="h",
+                marker_color="#E85B55",
+                text=[fmt_money(v,0) for v in imp["R$"]],textposition="outside"
+            ))
+            fig.update_layout(height=300,margin=dict(l=0,r=70,t=8,b=0),
+                              paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="rgba(0,0,0,0)",
+                              xaxis=dict(showgrid=False,showticklabels=False),
+                              yaxis=dict(showgrid=False))
+            st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
+            with st.expander("Racional do impacto financeiro"):
+                st.caption("Volume perdido é valorizado pela margem de contribuição unitária; refugo considera custo consumido nas unidades perdidas; eficiência MOD considera HH reais acima das HH padrão ganhas; horas extras consideram o custo incremental; custo/consumo compara real versus referência. Causa e efeito não são somados duas vezes.")
+
+    st.write("")
+    with st.container(border=True):
+        panel_title("Plano de Ações Proposto","Ações sugeridas a partir das alavancas priorizadas")
+        actions_view=diag.head(6)[["Prioridade","Alavanca","Acao","Responsavel","Horizonte_dias","Impacto_R$"]].copy()
+        actions_view["Impacto esperado"]=actions_view["Impacto_R$"].map(lambda x:fmt_money(x))
+        actions_view=actions_view.drop(columns=["Impacto_R$"])
+        actions_view=actions_view.rename(columns={"Acao":"Ação proposta","Responsavel":"Responsável","Horizonte_dias":"Horizonte (dias)"})
+        st.dataframe(actions_view,use_container_width=True,hide_index=True)
+
+    st.write("")
+    c1,c2=st.columns([1,.35])
+    with c1:
+        st.caption("A matriz usa o esforço configurado na aba Parametros_Diagnostico da planilha padrão. O impacto será calibrado com histórico por cliente/planta nas próximas versões.")
+    with c2:
+        if st.button("Adicionar Top 3 ao Plano de Ação",type="primary",use_container_width=True):
+            rows=[]
+            for _,r in diag.head(3).iterrows():
+                rows.append([
+                    "Alta" if r["Prioridade"]=="Prioridade 1" else "Média",
+                    r["Alavanca"],r["Acao"],r["Responsavel"],
+                    f"{int(r['Horizonte_dias'])} dias",fmt_money(r["Impacto_R$"]),"Planejado"
+                ])
+            new=pd.DataFrame(rows,columns=st.session_state.actions.columns)
+            st.session_state.actions=pd.concat([st.session_state.actions,new],ignore_index=True)
+            nav("Plano de Ação")
+
 
 elif page == "Finanças / DRE":
     page_header("Finanças / DRE","A operação traduzida em margem, custo fixo, variável e EBITDA.")
@@ -1319,7 +1651,7 @@ elif page == "Configurações":
 
     with tabs[0]:
         st.markdown("#### Importar Excel")
-        st.caption("Fluxo: carregar → validar → revisar → aplicar ao cockpit.")
+        st.caption("Fluxo: carregar → validar → revisar padrões de produto → aplicar ao cockpit. Para ambiente multiproduto, Padroes_Produto é obrigatório para linearizar o mix.")
         uploaded = st.file_uploader("Arquivo Excel", type=["xlsx","xls"], accept_multiple_files=False)
 
         if uploaded is not None:
