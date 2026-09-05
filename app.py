@@ -551,10 +551,10 @@ div[data-testid="stDataFrame"] {{
 
 
 /* v0.6.2.2 — Sidebar menu fully left-aligned */
-[data-testid="stSidebar"] .stButton {
+[data-testid="stSidebar"] .stButton {{
     width:100%;
-}
-[data-testid="stSidebar"] .stButton > button {
+}}
+[data-testid="stSidebar"] .stButton > button {{
     width:100% !important;
     display:flex !important;
     justify-content:flex-start !important;
@@ -562,23 +562,23 @@ div[data-testid="stDataFrame"] {{
     text-align:left !important;
     padding-left:.85rem !important;
     padding-right:.65rem !important;
-}
-[data-testid="stSidebar"] .stButton > button > div {
+}}
+[data-testid="stSidebar"] .stButton > button > div {{
     width:100% !important;
     display:flex !important;
     justify-content:flex-start !important;
     text-align:left !important;
-}
+}}
 [data-testid="stSidebar"] .stButton > button p,
-[data-testid="stSidebar"] .stButton > button span {
+[data-testid="stSidebar"] .stButton > button span {{
     width:100% !important;
     text-align:left !important;
     justify-content:flex-start !important;
     margin:0 !important;
-}
-[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] {
+}}
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] {{
     text-align:left !important;
-}
+}}
 
 </style>
 """, unsafe_allow_html=True)

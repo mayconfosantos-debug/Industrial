@@ -76,3 +76,10 @@ app.py
 - Menu lateral totalmente alinhado à esquerda.
 - Texto e conteúdo interno dos botões agora usam justify-content:flex-start e text-align:left.
 - Mantido o destaque azul/cyan do item ativo.
+
+
+## Hotfix v0.6.2.3
+- Corrigido NameError da linha `width:100%` no CSS do menu lateral.
+- Todas as chaves do CSS do hotfix da sidebar foram escapadas corretamente para uso dentro do f-string.
+- Auditoria do bloco de tema confirmou que as únicas expressões f-string restantes são as variáveis de tema esperadas.
+- Mantido o menu alinhado à esquerda.
