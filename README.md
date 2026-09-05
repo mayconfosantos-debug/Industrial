@@ -1,58 +1,44 @@
-# Industrial Performance Agent — MVP
 
-Este MVP transforma arquivos Excel industriais em um cockpit executivo com análise automática.
+# Industrial Performance SaaS — H2M | v0.1
 
-## O que já faz
-- Upload de um ou mais arquivos Excel.
-- Consolidação automática das abas.
-- Filtros por período, fábrica e linha.
-- KPIs: produção, atingimento, OEE, disponibilidade, performance, qualidade, refugo, margem, custo por unidade, horas extras e produtividade.
-- Diagnóstico automático dos principais desvios.
-- Estimativas de impacto financeiro.
-- Perguntas executivas ao Agente de Performance.
+Estrutura navegável do SaaS de performance industrial.
 
-## Estrutura esperada do Excel
-Use `industrial_performance_exemplo.xlsx` como modelo.
+## Telas incluídas
+1. Cockpit Executivo
+2. Performance Operacional
+3. Diagnóstico e Causas
+4. Finanças / DRE
+5. Alavancas de Valor
+6. Plano de Ação
+7. Agente de Performance
+8. Relatórios
+9. Configurações
 
-Abas:
-- Producao
-- Qualidade
-- Manutencao
-- Pessoas
-- Custos
-- Metas
+## Identidade
+- Logo original H2M preservado em arquivo de imagem, sem distorção.
+- Paleta inspirada na ZeroBaseTrack: navy, azul, cyan e branco.
+- Regra dos KPIs:
+  - Vermelho: desvio < -10%
+  - Laranja: -10% até < 0%
+  - Verde: >= 0%
 
-O aplicativo já reconhece alguns nomes alternativos de abas e colunas.
-
-## Como rodar localmente
-
-1. Instale Python 3.11+.
-2. Abra o terminal nesta pasta.
-3. Crie um ambiente virtual (opcional, recomendado).
-4. Instale as dependências:
-
+## Como rodar
 ```bash
 pip install -r requirements.txt
-```
-
-5. Rode:
-
-```bash
 streamlit run app.py
 ```
 
-6. O navegador abrirá o aplicativo.
+## Como publicar no Streamlit Community Cloud
+Suba toda a pasta para o GitHub mantendo a estrutura e aponte o "Main file path" para:
 
-## Como testar
-Faça upload do arquivo:
+`app.py`
 
-`industrial_performance_exemplo.xlsx`
-
-## Próximas evoluções recomendadas
-1. Mapeador DE/PARA visual de colunas.
-2. Banco PostgreSQL para histórico por cliente.
-3. Login e segregação por empresa.
-4. Integração ERP/MES.
-5. Motor de alertas e Morning Industrial Brief.
-6. Agente LLM com contexto controlado e trilha de evidências.
-7. Árvore financeira EBITDA / margem / perdas.
+## Próximas evoluções
+- Substituir dados-demo pelo Excel real.
+- DE/PARA visual de colunas.
+- Persistência PostgreSQL.
+- Autenticação e multiempresa.
+- Motor real de KPIs.
+- Árvore causal automatizada.
+- Motor de impacto financeiro / DRE.
+- Agente LLM com evidências e simulações.
