@@ -6,6 +6,14 @@ import plotly.graph_objects as go
 from pathlib import Path
 from io import BytesIO
 import unicodedata
+from urllib.parse import quote
+
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_LEFT, TA_CENTER
+from reportlab.lib.units import mm
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
 
 st.set_page_config(
     page_title="Industrial Performance | H2M",
@@ -340,6 +348,207 @@ div[data-testid="stVerticalBlockBorderWrapper"] {{
     padding:12px 14px;
     box-shadow:0 3px 12px rgba(10,35,60,.03);
 }}
+
+/* v0.6.1 - front-end refinement */
+div[data-testid="stVerticalBlockBorderWrapper"] {
+    min-width:0;
+}
+div[data-testid="stVerticalBlockBorderWrapper"] > div {
+    min-width:0;
+}
+div[data-testid="stDataFrame"] {
+    width:100%;
+}
+[data-testid="stMetric"] label {
+    min-height:18px;
+}
+[data-testid="stMetricValue"] {
+    white-space:nowrap;
+}
+.email-note {
+    font-size:.62rem;
+    color:#6E7C90;
+    line-height:1.45;
+}
+.report-note {
+    border-left:3px solid #00B7E8;
+    padding:8px 10px;
+    background:#F7FCFF;
+    border-radius:6px;
+    color:#34465C;
+    font-size:.65rem;
+}
+
+
+/* =========================================================
+   v0.6.2 — FRONT-END PREMIUM
+   ========================================================= */
+.block-container {
+    max-width: 1540px;
+    padding: .55rem 1.35rem 2.25rem 1.35rem;
+}
+[data-testid="stSidebar"] {
+    width:258px !important;
+}
+[data-testid="stSidebar"] > div:first-child {
+    width:258px !important;
+}
+[data-testid="stSidebar"] .block-container {
+    padding: .9rem .72rem 1rem .72rem;
+}
+[data-testid="stHorizontalBlock"] {
+    align-items: stretch;
+}
+[data-testid="stHorizontalBlock"] > div {
+    min-width:0;
+}
+div[data-testid="stVerticalBlockBorderWrapper"] {
+    background:#FFFFFF;
+    border:1px solid #DFE7EF !important;
+    border-radius:14px;
+    box-shadow:0 4px 16px rgba(10,35,60,.035);
+    overflow:hidden;
+}
+div[data-testid="stVerticalBlockBorderWrapper"] > div {
+    min-width:0;
+}
+div[data-testid="stMetric"] {
+    height:104px;
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+    background:#FFFFFF;
+    border:1px solid #DFE7EF;
+    border-radius:12px;
+    box-shadow:0 3px 12px rgba(10,35,60,.03);
+}
+div[data-testid="stMetricValue"] {
+    font-size:1.34rem;
+    line-height:1.05;
+    color:#10233F;
+}
+div[data-testid="stDataFrame"] {
+    border:1px solid #E3EAF1;
+    border-radius:10px;
+    overflow:hidden;
+}
+[data-testid="stDataFrame"] [role="columnheader"] {
+    font-weight:700;
+}
+.stTabs [data-baseweb="tab-list"] {
+    background:#F4F7FA;
+    border:1px solid #E1E8EF;
+    border-radius:10px;
+    padding:3px;
+}
+.stTabs [data-baseweb="tab"] {
+    border-radius:7px;
+}
+.stTabs [aria-selected="true"] {
+    background:white !important;
+    box-shadow:0 1px 4px rgba(10,35,60,.08);
+}
+[data-baseweb="select"] > div {
+    border-color:#DCE5ED !important;
+}
+.stSlider [data-baseweb="slider"] {
+    padding-top: .2rem;
+}
+.lever-shell {
+    background:linear-gradient(180deg,#FFFFFF 0%,#FAFCFE 100%);
+    border:1px solid #DDE6EF;
+    border-radius:14px;
+    padding:14px 15px;
+    min-height:96px;
+}
+.lever-kicker {
+    font-size:.55rem;
+    font-weight:850;
+    letter-spacing:.08em;
+    color:#0B5FA5;
+    text-transform:uppercase;
+}
+.lever-title {
+    font-size:.78rem;
+    font-weight:850;
+    color:#10233F;
+    margin-top:3px;
+}
+.lever-meta {
+    font-size:.58rem;
+    color:#6E7C90;
+    margin-top:4px;
+    line-height:1.35;
+}
+.sim-header {
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:12px;
+    margin-bottom:5px;
+}
+.sim-header-title {
+    font-size:1rem;
+    font-weight:850;
+    color:#10233F;
+}
+.sim-header-sub {
+    font-size:.63rem;
+    color:#6E7C90;
+    margin-top:3px;
+}
+.sim-scope-chip {
+    display:inline-block;
+    background:#EAF6FE;
+    color:#0B5FA5;
+    border:1px solid #CDE6F8;
+    padding:4px 8px;
+    border-radius:999px;
+    font-size:.55rem;
+    font-weight:850;
+}
+.sim-card {
+    background:#FFFFFF;
+    border:1px solid #DFE7EF;
+    border-radius:12px;
+    padding:12px 13px;
+    min-height:92px;
+}
+.sim-card-label {
+    color:#6E7C90;
+    font-size:.58rem;
+    font-weight:760;
+}
+.sim-card-value {
+    color:#10233F;
+    font-size:1.20rem;
+    font-weight:850;
+    margin-top:5px;
+    white-space:nowrap;
+}
+.sim-card-delta {
+    font-size:.59rem;
+    font-weight:800;
+    margin-top:3px;
+}
+.sim-mini {
+    font-size:.58rem;
+    color:#6E7C90;
+    line-height:1.4;
+}
+.conf-high {color:#12805C;font-weight:800;}
+.conf-mid {color:#C76A15;font-weight:800;}
+.conf-low {color:#7C8795;font-weight:800;}
+.frontend-note {
+    background:#F7FBFE;
+    border-left:3px solid #00B7E8;
+    border-radius:8px;
+    padding:9px 11px;
+    color:#40576B;
+    font-size:.62rem;
+    line-height:1.45;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -382,7 +591,10 @@ SHEETS = {
     "custos":["custos","costs","financeiro"],
     "metas":["metas","targets","goals"],
     "padroes_produto":["padroes_produto","padrões_produto","padroes","product_standards","standards"],
-    "parametros_diagnostico":["parametros_diagnostico","parametros_diagnóstico","diagnostico_parametros","diagnostic_parameters"]
+    "parametros_diagnostico":["parametros_diagnostico","parametros_diagnóstico","diagnostico_parametros","diagnostic_parameters"],
+    "responsaveis":["responsaveis","responsáveis","owners","responsibles"],
+    "alavancas_simulador":["alavancas_simulador","alavancas_simulação","simulator_levers"],
+    "premissas_simulador":["premissas_simulador","premissas_simulação","simulator_assumptions"]
 }
 ALIASES = {
     "producao":{
@@ -447,6 +659,34 @@ ALIASES = {
         "responsavel_tipico":["responsavel_tipico","responsável_típico","typical_owner"],
         "tipo_impacto":["tipo_impacto","impact_type"],
         "peso_minimo_gestao":["peso_minimo_gestao","peso_mínimo_gestão","minimum_management_weight"]
+    },
+    "responsaveis":{
+        "responsavel":["responsavel","responsável","name"],
+        "cargo_funcao":["cargo_funcao","cargo_função","role"],
+        "area":["area","área"],
+        "email":["email","e_mail","e-mail"],
+        "observacao":["observacao","observação","notes"]
+    },
+    "alavancas_simulador":{
+        "grupo":["grupo","group"],
+        "alavanca":["alavanca","lever"],
+        "formato":["formato","format"],
+        "atual_exemplo":["atual_exemplo","current_example"],
+        "meta_exemplo":["meta_exemplo","target_example"],
+        "unidade":["unidade","unit"],
+        "impacto_principal":["impacto_principal","primary_impact"],
+        "impacto_secundario":["impacto_secundario","secondary_impact"],
+        "dependencia":["dependencia","dependência","dependency"],
+        "confianca":["confianca","confiança","confidence"],
+        "ativa":["ativa","active"],
+        "observacao":["observacao","observação","notes"]
+    },
+    "premissas_simulador":{
+        "chave":["chave","key"],
+        "valor":["valor","value"],
+        "unidade":["unidade","unit"],
+        "uso_no_motor":["uso_no_motor","engine_use"],
+        "observacao":["observacao","observação","notes"]
     }
 }
 
@@ -595,6 +835,7 @@ def calculate_real(data):
     quality=max(0,min(1,safe_div(q["aprovado"].sum(),q["produzido"].sum())))
     oee=availability*min(performance,1)*quality
     scrap=safe_div(q["refugo"].sum(),q["produzido"].sum())
+    rework_rate=safe_div(q["retrabalho"].sum(),q["produzido"].sum()) if "retrabalho" in q.columns else np.nan
 
     # ---------------- Finance ----------------
     var_cost=c[["custo_mp","custo_mod","custo_energia","custo_manutencao"]].sum().sum()
@@ -609,6 +850,14 @@ def calculate_real(data):
     overtime=pe["horas_extras"].sum()
     actual_hh=pe["horas_normais"].sum()+overtime
     productivity_raw=safe_div(actual,actual_hh)
+    avg_headcount=np.nan
+    if "operadores" in pe.columns:
+        pe["operadores"]=nseries(pe["operadores"])
+        if "data" in pe.columns:
+            daily_hc=pe.groupby("data")["operadores"].sum()
+            avg_headcount=float(daily_hc.mean()) if len(daily_hc) else np.nan
+        else:
+            avg_headcount=float(pe["operadores"].mean()) if len(pe) else np.nan
 
     # ---------------- Mix linearization / labor efficiency ----------------
     labor_eff=np.nan
@@ -669,6 +918,17 @@ def calculate_real(data):
             "Paradas h":mm["duracao_horas"].sum()
         })
     line_perf=pd.DataFrame(rows)
+
+    mttr_min=float(m["duracao_horas"].mean()*60) if len(m) else np.nan
+    setup_avg_min=np.nan
+    if "tipo_parada" in m.columns:
+        setup_mask=m["tipo_parada"].astype(str).map(norm).str.contains("setup|troca|changeover",regex=True)
+        if setup_mask.any():
+            setup_avg_min=float(m.loc[setup_mask,"duracao_horas"].mean()*60)
+    if pd.isna(setup_avg_min) and "causa" in m.columns:
+        setup_mask=m["causa"].astype(str).map(norm).str.contains("setup|troca|changeover",regex=True)
+        if setup_mask.any():
+            setup_avg_min=float(m.loc[setup_mask,"duracao_horas"].mean()*60)
 
     causes=m.groupby("causa",as_index=False)["duracao_horas"].sum().rename(columns={"duracao_horas":"Horas"})
     if not causes.empty:
@@ -819,6 +1079,10 @@ def calculate_real(data):
         "ebitda":ebitda,"revenue":revenue,"actual":actual,"planned":planned,
         "availability":availability,"performance":performance,"quality":quality,
         "cost_unit":cost_unit,"overtime":overtime,"productivity":productivity_raw,
+        "rework_rate":rework_rate,"mttr_min":mttr_min,"setup_avg_min":setup_avg_min,
+        "avg_headcount":avg_headcount,
+        "cost_mp":float(c["custo_mp"].sum()),"cost_mod":float(c["custo_mod"].sum()),
+        "cost_energy":float(c["custo_energia"].sum()),"cost_maintenance":float(c["custo_manutencao"].sum()),
         "labor_efficiency":labor_eff,"std_hours_earned":std_hours_earned,"actual_hh":actual_hh,
         "standards_missing":standards_missing,
         "health_score":health_score,"financial_health":financial_health,"operational_health":operational_health,
@@ -897,6 +1161,8 @@ def demo_dataset():
         "ebitda":1900000,"revenue":12400000,"actual":41250,"planned":45000,
         "availability":.748,"performance":.945,"quality":.981,
         "cost_unit":18.42,"overtime":1280,"productivity":18.2,
+        "rework_rate":.042,"mttr_min":95.0,"setup_avg_min":48.0,"avg_headcount":118,
+        "cost_mp":5191000.0,"cost_mod":1611000.0,"cost_energy":895000.0,"cost_maintenance":1253000.0,
         "labor_efficiency":.898,"std_hours_earned":12120,"actual_hh":13497,
         "standards_missing":[],
         "health_score":55,"financial_health":49,"operational_health":61,
@@ -904,6 +1170,222 @@ def demo_dataset():
         "diagnostic":diagnostic,
         "diagnostic_conclusion":"A fábrica fechou em 91,7% do plano, com OEE de 71,4% e margem de contribuição de 27,8%. A saúde consolidada está em 55/100 e a saúde financeira em 49/100. A Linha 3 é a mais crítica (OEE 64%). A principal causa de parada é Falha mecânica (58 h). As alavancas a priorizar são Disponibilidade e Refugo."
     }
+
+
+def _pdf_money(v):
+    try:
+        return fmt_money(float(v))
+    except Exception:
+        return str(v)
+
+def build_diagnostic_pdf(D, diag, causes):
+    """Create a compact executive PDF report from the diagnostic page."""
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, pagesize=A4,
+        rightMargin=14*mm, leftMargin=14*mm,
+        topMargin=14*mm, bottomMargin=14*mm,
+        title="Industrial Performance - Relatorio de Diagnostico"
+    )
+
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(
+        name="H2MTitle", parent=styles["Title"],
+        fontName="Helvetica-Bold", fontSize=18, leading=21,
+        textColor=colors.HexColor("#071C31"), spaceAfter=4
+    ))
+    styles.add(ParagraphStyle(
+        name="H2MSub", parent=styles["Normal"],
+        fontName="Helvetica", fontSize=8.5, leading=11,
+        textColor=colors.HexColor("#6E7C90"), spaceAfter=8
+    ))
+    styles.add(ParagraphStyle(
+        name="H2MSection", parent=styles["Heading2"],
+        fontName="Helvetica-Bold", fontSize=11, leading=13,
+        textColor=colors.HexColor("#10233F"), spaceBefore=8, spaceAfter=5
+    ))
+    styles.add(ParagraphStyle(
+        name="H2MBody", parent=styles["BodyText"],
+        fontName="Helvetica", fontSize=8.5, leading=12,
+        textColor=colors.HexColor("#34465C")
+    ))
+    styles.add(ParagraphStyle(
+        name="H2MSmall", parent=styles["BodyText"],
+        fontName="Helvetica", fontSize=7.4, leading=9.5,
+        textColor=colors.HexColor("#566B7C")
+    ))
+
+    story = []
+    story.append(Paragraph("INDUSTRIAL PERFORMANCE", styles["H2MSub"]))
+    story.append(Paragraph("Relatorio Executivo de Diagnostico", styles["H2MTitle"]))
+    story.append(Paragraph(
+        "Performance operacional -> causa -> impacto financeiro -> alavanca -> acao.",
+        styles["H2MSub"]
+    ))
+
+    # Executive score table
+    score_data = [
+        ["Saude Geral", "Saude Financeira", "Saude Operacional", "OEE", "Margem"],
+        [f"{D['health_score']:.0f}/100", f"{D['financial_health']:.0f}/100",
+         f"{D['operational_health']:.0f}/100", fmt_pct(D["oee"]), fmt_pct(D["margin"])]
+    ]
+    score_table = Table(score_data, colWidths=[35*mm]*5)
+    score_table.setStyle(TableStyle([
+        ("BACKGROUND",(0,0),(-1,0),colors.HexColor("#071C31")),
+        ("TEXTCOLOR",(0,0),(-1,0),colors.white),
+        ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),
+        ("FONTSIZE",(0,0),(-1,-1),7.5),
+        ("ALIGN",(0,0),(-1,-1),"CENTER"),
+        ("BACKGROUND",(0,1),(-1,1),colors.HexColor("#F4F7FB")),
+        ("TEXTCOLOR",(0,1),(-1,1),colors.HexColor("#10233F")),
+        ("FONTNAME",(0,1),(-1,1),"Helvetica-Bold"),
+        ("BOX",(0,0),(-1,-1),0.4,colors.HexColor("#DDE6EF")),
+        ("INNERGRID",(0,0),(-1,-1),0.3,colors.HexColor("#DDE6EF")),
+        ("TOPPADDING",(0,0),(-1,-1),5),
+        ("BOTTOMPADDING",(0,0),(-1,-1),5),
+    ]))
+    story.append(score_table)
+    story.append(Spacer(1, 5*mm))
+
+    story.append(Paragraph("Conclusao executiva", styles["H2MSection"]))
+    story.append(Paragraph(str(D.get("diagnostic_conclusion","")), styles["H2MBody"]))
+
+    story.append(Paragraph("Principais KPIs", styles["H2MSection"]))
+    kpi_data = [["Indicador","Realizado","Meta","Desvio"]]
+    for ind,mes,meta,score,delta,tend in D["kpis"]:
+        kpi_data.append([str(ind),str(mes),str(meta),str(delta)])
+    t = Table(kpi_data, colWidths=[56*mm,39*mm,39*mm,38*mm], repeatRows=1)
+    t.setStyle(TableStyle([
+        ("BACKGROUND",(0,0),(-1,0),colors.HexColor("#0B5FA5")),
+        ("TEXTCOLOR",(0,0),(-1,0),colors.white),
+        ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),
+        ("FONTSIZE",(0,0),(-1,-1),7.2),
+        ("TEXTCOLOR",(0,1),(-1,-1),colors.HexColor("#10233F")),
+        ("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#F8FAFC")]),
+        ("GRID",(0,0),(-1,-1),0.25,colors.HexColor("#DDE6EF")),
+        ("VALIGN",(0,0),(-1,-1),"MIDDLE"),
+        ("TOPPADDING",(0,0),(-1,-1),4),
+        ("BOTTOMPADDING",(0,0),(-1,-1),4),
+    ]))
+    story.append(t)
+
+    story.append(Paragraph("Alavancas priorizadas", styles["H2MSection"]))
+    d = diag.head(6).copy()
+    lever_data = [["Prioridade","Alavanca","Impacto","Esforco","Horizonte","Responsavel"]]
+    for _,r in d.iterrows():
+        lever_data.append([
+            str(r["Prioridade"]), str(r["Alavanca"]), _pdf_money(r["Impacto_R$"]),
+            f"{int(r['Esforco'])}/5", f"{int(r['Horizonte_dias'])} dias", str(r["Responsavel"])
+        ])
+    lt = Table(lever_data, colWidths=[24*mm,34*mm,28*mm,20*mm,24*mm,46*mm], repeatRows=1)
+    lt.setStyle(TableStyle([
+        ("BACKGROUND",(0,0),(-1,0),colors.HexColor("#071C31")),
+        ("TEXTCOLOR",(0,0),(-1,0),colors.white),
+        ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),
+        ("FONTSIZE",(0,0),(-1,-1),6.8),
+        ("GRID",(0,0),(-1,-1),0.25,colors.HexColor("#DDE6EF")),
+        ("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#F8FAFC")]),
+        ("VALIGN",(0,0),(-1,-1),"TOP"),
+        ("TOPPADDING",(0,0),(-1,-1),4),
+        ("BOTTOMPADDING",(0,0),(-1,-1),4),
+    ]))
+    story.append(lt)
+
+    story.append(PageBreak())
+    story.append(Paragraph("Causas e perdas", styles["H2MSection"]))
+    cause_data=[["Causa","Horas","Impacto estimado"]]
+    for _,r in causes.head(8).iterrows():
+        cause_data.append([
+            str(r["Causa"]), f"{float(r['Horas']):.0f} h",
+            f"R$ {float(r.get('Impacto R$ mil',0)):.0f} mil"
+        ])
+    ct=Table(cause_data,colWidths=[95*mm,35*mm,48*mm],repeatRows=1)
+    ct.setStyle(TableStyle([
+        ("BACKGROUND",(0,0),(-1,0),colors.HexColor("#0B5FA5")),
+        ("TEXTCOLOR",(0,0),(-1,0),colors.white),
+        ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),
+        ("FONTSIZE",(0,0),(-1,-1),7.2),
+        ("GRID",(0,0),(-1,-1),0.25,colors.HexColor("#DDE6EF")),
+        ("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#F8FAFC")]),
+        ("TOPPADDING",(0,0),(-1,-1),4),
+        ("BOTTOMPADDING",(0,0),(-1,-1),4),
+    ]))
+    story.append(ct)
+
+    story.append(Paragraph("Plano de acoes sugerido", styles["H2MSection"]))
+    action_data=[["Alavanca","Acao proposta","Responsavel","Impacto"]]
+    for _,r in d.iterrows():
+        action_data.append([
+            str(r["Alavanca"]),
+            Paragraph(str(r["Acao"]), styles["H2MSmall"]),
+            str(r["Responsavel"]),
+            _pdf_money(r["Impacto_R$"])
+        ])
+    at=Table(action_data,colWidths=[32*mm,82*mm,38*mm,30*mm],repeatRows=1)
+    at.setStyle(TableStyle([
+        ("BACKGROUND",(0,0),(-1,0),colors.HexColor("#071C31")),
+        ("TEXTCOLOR",(0,0),(-1,0),colors.white),
+        ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),
+        ("FONTSIZE",(0,0),(-1,-1),6.8),
+        ("GRID",(0,0),(-1,-1),0.25,colors.HexColor("#DDE6EF")),
+        ("VALIGN",(0,0),(-1,-1),"TOP"),
+        ("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#F8FAFC")]),
+        ("TOPPADDING",(0,0),(-1,-1),4),
+        ("BOTTOMPADDING",(0,0),(-1,-1),4),
+    ]))
+    story.append(at)
+    story.append(Spacer(1,4*mm))
+    story.append(Paragraph(
+        "Nota metodologica: o impacto financeiro utiliza buckets sem dupla contagem entre causa e efeito. "
+        "KPIs sem meta ou sem dado sao penalizados como risco de gestao. A produtividade multiproduto deve ser linearizada por horas-padrao.",
+        styles["H2MSmall"]
+    ))
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+def sim_assumption(key, default):
+    data=st.session_state.get("real_data")
+    if not data or "premissas_simulador" not in data:
+        return default
+    df=data["premissas_simulador"]
+    if df is None or df.empty or "chave" not in df.columns or "valor" not in df.columns:
+        return default
+    hit=df[df["chave"].astype(str).map(norm)==norm(key)]
+    if hit.empty:
+        return default
+    val=pd.to_numeric(hit.iloc[0]["valor"],errors="coerce")
+    return float(val) if pd.notna(val) else default
+
+def owner_email(owner_name):
+    data=st.session_state.get("real_data")
+    if not data or "responsaveis" not in data:
+        return ""
+    r=data["responsaveis"]
+    if r is None or r.empty or "responsavel" not in r.columns or "email" not in r.columns:
+        return ""
+    target=norm(owner_name)
+    hit=r[r["responsavel"].astype(str).map(norm)==target]
+    if hit.empty:
+        return ""
+    return str(hit.iloc[0]["email"] or "").strip()
+
+def action_mailto(row):
+    email=str(row.get("E-mail","") or "").strip()
+    subject=f"Plano de Acao - {row.get('Problema','Industrial Performance')}"
+    body=(
+        f"Ola {row.get('Responsável','')},\n\n"
+        f"Segue a acao sob sua responsabilidade no Industrial Performance:\n\n"
+        f"Problema / oportunidade: {row.get('Problema','')}\n"
+        f"Acao: {row.get('Ação','')}\n"
+        f"Prioridade: {row.get('Prioridade','')}\n"
+        f"Prazo: {row.get('Prazo','')}\n"
+        f"Impacto esperado: {row.get('Impacto','')}\n"
+        f"Status: {row.get('Status','')}\n\n"
+        "Por favor, confirme o recebimento e atualize o andamento da acao."
+    )
+    return f"mailto:{quote(email)}?subject={quote(subject)}&body={quote(body)}"
 
 def kpi_card(label,value,score,delta):
     c=score_color(score)
@@ -964,10 +1446,10 @@ if "real_data" not in st.session_state:
     st.session_state.real_data = None
 if "actions" not in st.session_state:
     st.session_state.actions = pd.DataFrame([
-        ["Alta","Disponibilidade Linha 3","Plano de confiabilidade MX-04","Ger. Manutenção","10/09/2026","R$ 312 mil","Em andamento"],
-        ["Alta","Refugo Produto A","Revisar parâmetros de processo","Ger. Qualidade","12/09/2026","R$ 214 mil","Não iniciado"],
-        ["Média","Horas extras","Redimensionar turnos","Ger. Produção","15/09/2026","R$ 88 mil","Em andamento"],
-    ], columns=["Prioridade","Problema","Ação","Responsável","Prazo","Impacto","Status"])
+        ["Alta","Disponibilidade Linha 3","Plano de confiabilidade MX-04","Ger. Manutenção","","10/09/2026","R$ 312 mil","Em andamento"],
+        ["Alta","Refugo Produto A","Revisar parâmetros de processo","Ger. Qualidade","","12/09/2026","R$ 214 mil","Não iniciado"],
+        ["Média","Horas extras","Redimensionar turnos","Ger. Produção","","15/09/2026","R$ 88 mil","Em andamento"],
+    ], columns=["Prioridade","Problema","Ação","Responsável","E-mail","Prazo","Impacto","Status"])
 
 D = calculate_real(st.session_state.real_data) if st.session_state.real_data else demo_dataset()
 
@@ -1014,12 +1496,12 @@ if page == "Cockpit Executivo":
     left, mid, right = st.columns([1.00,1.25,.72], gap="small")
 
     with left:
-        with st.container(border=True):
+        with st.container(border=True, height=425):
             panel_title("Principais Indicadores","Realizado, meta, desvio e tendência")
             st.markdown(table_kpis(D), unsafe_allow_html=True)
 
     with mid:
-        with st.container(border=True):
+        with st.container(border=True, height=425):
             panel_title("Tendência de Produção","Realizado versus plano — leitura contínua")
             trend = D["trend"].copy()
             x = trend["data"] if "data" in trend.columns else np.arange(len(trend))
@@ -1044,7 +1526,7 @@ if page == "Cockpit Executivo":
             st.plotly_chart(fig, use_container_width=True, config={"displayModeBar":False})
 
     with right:
-        with st.container(border=True):
+        with st.container(border=True, height=425):
             panel_title("Saúde de Performance","Score ponderado por relevância financeira")
             h=D["health_score"]
             hcolor=GREEN if h>=75 else ORANGE if h>=55 else RED
@@ -1091,7 +1573,7 @@ if page == "Cockpit Executivo":
     c1, c2, c3 = st.columns([1.02,1.05,.88], gap="small")
 
     with c1:
-        with st.container(border=True):
+        with st.container(border=True, height=315):
             panel_title("Impactos no Resultado","Principais perdas traduzidas em R$")
             imp = D["impacts"].sort_values("R$").tail(5)
             fig = go.Figure(go.Bar(
@@ -1111,7 +1593,7 @@ if page == "Cockpit Executivo":
             st.plotly_chart(fig, use_container_width=True, config={"displayModeBar":False})
 
     with c2:
-        with st.container(border=True):
+        with st.container(border=True, height=315):
             panel_title("Alavancas Prioritárias","Onde atacar primeiro para recuperar resultado")
             lev = [
                 ("Disponibilidade","Linha 3",312000,"Alta"),
@@ -1140,7 +1622,7 @@ if page == "Cockpit Executivo":
             nav("Alavancas de Valor")
 
     with c3:
-        with st.container(border=True):
+        with st.container(border=True, height=315):
             panel_title("Alertas Executivos","Desvios que exigem atenção")
             alerts = [
                 (RED,"OEE da Linha 3 abaixo da meta","Principal pressão sobre disponibilidade."),
@@ -1195,7 +1677,7 @@ elif page == "Performance Operacional":
     c1, c2 = st.columns(2, gap="small")
 
     with c1:
-        with st.container(border=True):
+        with st.container(border=True, height=375):
             panel_title("OEE por Linha","Comparação com meta")
             colors = [score_color(safe_div(v,D["target_oee"])-1) for v in lp["OEE"]]
             fig = go.Figure(go.Bar(
@@ -1210,7 +1692,7 @@ elif page == "Performance Operacional":
             st.plotly_chart(fig, use_container_width=True, config={"displayModeBar":False})
 
     with c2:
-        with st.container(border=True):
+        with st.container(border=True, height=375):
             panel_title("Paradas x Gap de Produção","Quanto mais à direita e abaixo, pior")
             fig = go.Figure(go.Scatter(
                 x=lp["Paradas h"], y=lp["Gap Produção"], mode="markers+text",
@@ -1252,74 +1734,98 @@ elif page == "Diagnóstico e Causas":
             st.warning("Há produtos sem padrão cadastrado: " + ", ".join(D["standards_missing"]) + ". A eficiência MOD não deve ser usada até completar o cadastro.")
 
     st.write("")
-    c1,c2=st.columns([1.08,.92],gap="small")
+    c1,c2=st.columns([1.10,.90],gap="small")
 
     with c1:
-        with st.container(border=True):
-            panel_title("Matriz Esforço x Resultado","Priorize alto impacto com menor esforço")
+        with st.container(border=True, height=430):
+            panel_title("Matriz Esforço x Resultado","Priorize impacto financeiro alto com menor esforço")
             if not diag.empty:
-                colors=[GREEN if p=="Prioridade 1" else ORANGE if p=="Prioridade 2" else "#AAB7C4" for p in diag["Prioridade"]]
+                plot=diag.sort_values("Indice_Prioridade",ascending=False).copy()
+                labels=[str(v) if i < 6 else "" for i,v in enumerate(plot["Alavanca"].tolist())]
+                colors_plot=[GREEN if p=="Prioridade 1" else ORANGE if p=="Prioridade 2" else "#AAB7C4" for p in plot["Prioridade"]]
+                med=float(plot["Impacto_R$"].median())
                 fig=go.Figure(go.Scatter(
-                    x=diag["Esforco"], y=diag["Impacto_R$"],
+                    x=plot["Esforco"], y=plot["Impacto_R$"],
                     mode="markers+text",
-                    text=diag["Alavanca"], textposition="top center",
+                    text=labels,
+                    textposition=["top center","bottom center","top right","bottom left","top left","bottom right"] + ["top center"]*max(0,len(plot)-6),
+                    textfont=dict(size=10,color=TEXT),
                     marker=dict(
-                        size=np.clip(diag["Resultado_0a100"]/2+18,18,52),
-                        color=colors, opacity=.82,
+                        size=np.clip(plot["Resultado_0a100"]/2+18,18,50),
+                        color=colors_plot, opacity=.86,
                         line=dict(width=1.5,color="white")
                     ),
-                    customdata=np.stack([diag["Horizonte_dias"],diag["Responsavel"],diag["Prioridade"]],axis=-1),
-                    hovertemplate="<b>%{text}</b><br>Esforço: %{x}/5<br>Impacto: R$ %{y:,.0f}<br>Horizonte: %{customdata[0]} dias<br>%{customdata[2]}<extra></extra>"
+                    customdata=np.stack([plot["Horizonte_dias"],plot["Responsavel"],plot["Prioridade"],plot["Impacto_R$"]],axis=-1),
+                    hovertemplate="<b>%{text}</b><br>Esforço: %{x}/5<br>Impacto: R$ %{customdata[3]:,.0f}<br>Horizonte: %{customdata[0]} dias<br>%{customdata[2]}<extra></extra>",
+                    cliponaxis=False
                 ))
-                fig.update_xaxes(range=[0.5,5.5],dtick=1,title="Esforço (1 = baixo | 5 = alto)",gridcolor="#EFF3F7")
-                fig.update_yaxes(title="Impacto potencial (R$)",gridcolor="#EFF3F7",tickformat=",.0f")
-                fig.update_layout(height=355,margin=dict(l=10,r=10,t=20,b=35),
+                fig.add_vline(x=3,line_dash="dot",line_color="#C8D4DE",line_width=1)
+                fig.add_hline(y=med,line_dash="dot",line_color="#C8D4DE",line_width=1)
+                fig.add_annotation(x=1.1,y=max(plot["Impacto_R$"])*1.08,text="<b>QUICK WINS</b>",showarrow=False,font=dict(size=9,color=GREEN))
+                fig.update_xaxes(range=[0.6,5.4],dtick=1,title="Esforço (1 = baixo | 5 = alto)",gridcolor="#EFF3F7",automargin=True)
+                fig.update_yaxes(range=[0,max(plot["Impacto_R$"])*1.22],title="Impacto potencial (R$)",gridcolor="#EFF3F7",tickformat=",.0f",automargin=True)
+                fig.update_layout(height=350,margin=dict(l=15,r=25,t=30,b=45),
                                   paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="rgba(0,0,0,0)",
                                   showlegend=False)
                 st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
 
     with c2:
-        with st.container(border=True):
-            panel_title("Prioridades Recomendadas","Ranking por resultado financeiro versus esforço")
-            show=diag.head(6)[["Alavanca","Impacto_R$","Esforco","Horizonte_dias","Prioridade"]].copy()
+        with st.container(border=True, height=430):
+            panel_title("Prioridades Recomendadas","Ranking por impacto financeiro versus esforço")
+            show=diag.head(7)[["Alavanca","Impacto_R$","Esforco","Horizonte_dias","Prioridade"]].copy()
             show["Impacto"]=show["Impacto_R$"].map(lambda x:fmt_money(x))
             show=show.drop(columns=["Impacto_R$"])
-            st.dataframe(show,use_container_width=True,hide_index=True,height=300)
+            st.dataframe(
+                show,use_container_width=True,hide_index=True,height=350,
+                column_config={
+                    "Alavanca":st.column_config.TextColumn("Alavanca",width="medium"),
+                    "Esforco":st.column_config.NumberColumn("Esforço",format="%d/5",width="small"),
+                    "Horizonte_dias":st.column_config.NumberColumn("Horizonte",format="%d dias",width="small"),
+                    "Prioridade":st.column_config.TextColumn("Prioridade",width="medium"),
+                    "Impacto":st.column_config.TextColumn("Impacto",width="medium"),
+                }
+            )
 
     st.write("")
     c1,c2=st.columns(2,gap="small")
     with c1:
-        with st.container(border=True):
+        with st.container(border=True, height=390):
             panel_title("Pareto de Causas","Horas perdidas e concentração")
             if not causes.empty:
                 df=causes.sort_values("Horas")
                 fig=go.Figure(go.Bar(
                     x=df["Horas"],y=df["Causa"],orientation="h",
                     marker_color=BLUE,
-                    text=[f"{x:.0f} h" for x in df["Horas"]],textposition="outside"
+                    text=[f"{x:.0f} h" for x in df["Horas"]],textposition="outside",
+                    cliponaxis=False
                 ))
-                fig.update_layout(height=300,margin=dict(l=0,r=55,t=8,b=0),
+                xmax=max(df["Horas"])*1.22
+                fig.update_layout(height=320,margin=dict(l=5,r=55,t=8,b=10),
                                   paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="rgba(0,0,0,0)",
-                                  xaxis=dict(showgrid=False,showticklabels=False),
-                                  yaxis=dict(showgrid=False))
+                                  xaxis=dict(showgrid=False,showticklabels=False,range=[0,xmax]),
+                                  yaxis=dict(showgrid=False,automargin=True,tickfont=dict(size=10,color=TEXT)),
+                                  showlegend=False)
                 st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
 
     with c2:
-        with st.container(border=True):
+        with st.container(border=True, height=390):
             panel_title("Impacto Financeiro","Buckets sem dupla contagem")
             imp=D["impacts"].sort_values("R$")
             fig=go.Figure(go.Bar(
                 x=imp["R$"],y=imp["Impacto"],orientation="h",
                 marker_color="#E85B55",
-                text=[fmt_money(v,0) for v in imp["R$"]],textposition="outside"
+                text=[fmt_money(v,0) for v in imp["R$"]],textposition="outside",
+                cliponaxis=False
             ))
-            fig.update_layout(height=300,margin=dict(l=0,r=70,t=8,b=0),
+            xmax=max(imp["R$"])*1.34 if len(imp) else 1
+            fig.update_layout(height=275,margin=dict(l=5,r=110,t=8,b=0),
                               paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="rgba(0,0,0,0)",
-                              xaxis=dict(showgrid=False,showticklabels=False),
-                              yaxis=dict(showgrid=False))
+                              xaxis=dict(showgrid=False,showticklabels=False,range=[0,xmax]),
+                              yaxis=dict(showgrid=False,automargin=True,tickfont=dict(size=10,color=TEXT)),
+                              showlegend=False)
             st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
             with st.expander("Racional do impacto financeiro"):
-                st.caption("Volume perdido é valorizado pela margem de contribuição unitária; refugo considera custo consumido nas unidades perdidas; eficiência MOD considera HH reais acima das HH padrão ganhas; horas extras consideram o custo incremental; custo/consumo compara real versus referência. Causa e efeito não são somados duas vezes.")
+                st.caption("Volume perdido é valorizado pela margem de contribuição unitária; refugo considera custo consumido nas unidades perdidas; eficiência MOD considera HH reais acima das HH padrão ganhas; horas extras consideram custo incremental; custo/consumo compara real versus referência. Causa e efeito não são somados duas vezes.")
 
     st.write("")
     with st.container(border=True):
@@ -1327,20 +1833,37 @@ elif page == "Diagnóstico e Causas":
         actions_view=diag.head(6)[["Prioridade","Alavanca","Acao","Responsavel","Horizonte_dias","Impacto_R$"]].copy()
         actions_view["Impacto esperado"]=actions_view["Impacto_R$"].map(lambda x:fmt_money(x))
         actions_view=actions_view.drop(columns=["Impacto_R$"])
-        actions_view=actions_view.rename(columns={"Acao":"Ação proposta","Responsavel":"Responsável","Horizonte_dias":"Horizonte (dias)"})
-        st.dataframe(actions_view,use_container_width=True,hide_index=True)
+        actions_view=actions_view.rename(columns={"Acao":"Ação proposta","Responsavel":"Responsável","Horizonte_dias":"Horizonte"})
+        st.dataframe(
+            actions_view,use_container_width=True,hide_index=True,height=280,
+            column_config={
+                "Prioridade":st.column_config.TextColumn("Prioridade",width="small"),
+                "Alavanca":st.column_config.TextColumn("Alavanca",width="medium"),
+                "Ação proposta":st.column_config.TextColumn("Ação proposta",width="large"),
+                "Responsável":st.column_config.TextColumn("Responsável",width="medium"),
+                "Horizonte":st.column_config.NumberColumn("Horizonte",format="%d dias",width="small"),
+                "Impacto esperado":st.column_config.TextColumn("Impacto",width="medium"),
+            }
+        )
 
     st.write("")
-    c1,c2=st.columns([1,.35])
+    c1,c2,c3=st.columns([1,.30,.32])
     with c1:
-        st.caption("A matriz usa o esforço configurado na aba Parametros_Diagnostico da planilha padrão. O impacto será calibrado com histórico por cliente/planta nas próximas versões.")
+        st.caption("A matriz usa o esforço configurado em Parametros_Diagnostico. O impacto será calibrado por cliente/planta com histórico real.")
     with c2:
-        if st.button("Adicionar Top 3 ao Plano de Ação",type="primary",use_container_width=True):
+        pdf_bytes=build_diagnostic_pdf(D,diag,causes)
+        st.download_button(
+            "Baixar relatório PDF",data=pdf_bytes,
+            file_name="Relatorio_Diagnostico_Industrial_Performance.pdf",
+            mime="application/pdf",use_container_width=True
+        )
+    with c3:
+        if st.button("Adicionar Top 3 ao Plano",type="primary",use_container_width=True):
             rows=[]
             for _,r in diag.head(3).iterrows():
                 rows.append([
                     "Alta" if r["Prioridade"]=="Prioridade 1" else "Média",
-                    r["Alavanca"],r["Acao"],r["Responsavel"],
+                    r["Alavanca"],r["Acao"],r["Responsavel"],owner_email(r["Responsavel"]),
                     f"{int(r['Horizonte_dias'])} dias",fmt_money(r["Impacto_R$"]),"Planejado"
                 ])
             new=pd.DataFrame(rows,columns=st.session_state.actions.columns)
@@ -1360,13 +1883,13 @@ elif page == "Finanças / DRE":
     st.write("")
     c1, c2 = st.columns([1.15,.85], gap="small")
     with c1:
-        with st.container(border=True):
+        with st.container(border=True, height=340):
             panel_title("DRE Gerencial","Visão resumida do resultado")
             view = D["dre"].copy()
             view["Realizado"] = view["Realizado"].map(lambda x: fmt_money(x))
             st.dataframe(view, use_container_width=True, hide_index=True)
     with c2:
-        with st.container(border=True):
+        with st.container(border=True, height=340):
             panel_title("Custo Fixo x Variável","Estrutura econômica da operação")
             vals = D["cost_structure"]
             fig = go.Figure(go.Pie(labels=list(vals.keys()), values=list(vals.values()), hole=.72,
@@ -1378,208 +1901,730 @@ elif page == "Finanças / DRE":
             st.plotly_chart(fig, use_container_width=True, config={"displayModeBar":False})
 
 elif page == "Alavancas de Valor":
-    page_header("Alavancas de Valor","Simule cenários multi-alavancas e veja o impacto no resultado.")
+    page_header("Alavancas de Valor","Simule as 26 alavancas acordadas e traduza performance em receita, margem, EBITDA e caixa.")
 
-    base_revenue = D["revenue"]
-    base_margin = D["margin"]
-    base_ebitda = D["ebitda"]
-    base_fixed = D["cost_structure"]["Fixo"]
-    base_var = D["cost_structure"]["Variável"]
+    # ------------------------------------------------------------------
+    # Baselines / configurable assumptions
+    # ------------------------------------------------------------------
+    base_revenue=float(D["revenue"])
+    base_margin=float(D["margin"])
+    base_ebitda=float(D["ebitda"])
+    base_fixed=float(D["cost_structure"]["Fixo"])
+    base_var=float(D["cost_structure"]["Variável"])
+    base_mp=float(D.get("cost_mp",base_var*sim_assumption("participacao_mp_custo_variavel",0.58)))
+    base_energy=float(D.get("cost_energy",base_var*sim_assumption("participacao_energia_custo_variavel",0.10)))
+    base_mod=float(D.get("cost_mod",base_var*0.18))
 
-    left, right = st.columns([1.45,.75], gap="small")
+    capacity_base=sim_assumption("capacidade_utilizada_base",72.0)
+    setup_base=float(D.get("setup_avg_min",np.nan))
+    if pd.isna(setup_base):
+        setup_base=sim_assumption("setup_medio_base",48.0)
+    mttr_base=float(D.get("mttr_min",np.nan))
+    if pd.isna(mttr_base):
+        mttr_base=sim_assumption("mttr_base",95.0)
+    rework_base=float(D.get("rework_rate",np.nan))*100
+    if pd.isna(rework_base):
+        rework_base=sim_assumption("retrabalho_base",4.2)
+    otif_base=sim_assumption("otif_base",89.0)
+    mp_specific_base=sim_assumption("consumo_mp_indice_base",1.04)
+    avg_monthly_person_cost=sim_assumption("custo_medio_mensal_pessoa",8500.0)
+    mp_share=sim_assumption("participacao_mp_custo_variavel",0.58)
+    freight_share=sim_assumption("participacao_frete_custo_variavel",0.07)
+    contracts_share=sim_assumption("participacao_contratos_custo_fixo",0.22)
+    otif_risk_share=sim_assumption("receita_em_risco_otif",0.12)
+    period_days=max(1.0,sim_assumption("dias_periodo",30.0))
+
+    base_productivity=float(D.get("productivity",18.2))
+    base_headcount=float(D.get("avg_headcount",np.nan))
+    if pd.isna(base_headcount):
+        base_headcount=118.0
+
+    # ------------------------------------------------------------------
+    # Scope defaults — exactly the agreed simulator scope
+    # ------------------------------------------------------------------
+    scope_targets={
+        "sim_oee":78.0,
+        "sim_availability":82.0,
+        "sim_performance":97.0,
+        "sim_capacity":80.0,
+        "sim_scrap":2.5,
+        "sim_rework":2.0,
+        "sim_setup":35.0,
+        "sim_unplanned":20,
+        "sim_mttr":70.0,
+        "sim_overtime":25,
+        "sim_productivity":20.0,
+        "sim_headcount":0,
+        "sim_mp_specific":1.00,
+        "sim_mp_price":3.0,
+        "sim_material_loss":15,
+        "sim_energy":8.0,
+        "sim_freight":5.0,
+        "sim_otif":95.0,
+        "sim_price":2.0,
+        "sim_mix":1.0,
+        "sim_volume":5.0,
+        "sim_fixed":5.0,
+        "sim_contracts":10.0,
+        "sim_inventory":10,
+        "sim_dpo":5,
+        "sim_dso":5,
+    }
+    base_targets={
+        "sim_oee":float(np.clip(D["oee"]*100,40.0,95.0)),
+        "sim_availability":float(np.clip(D["availability"]*100,50.0,99.0)),
+        "sim_performance":float(np.clip(D["performance"]*100,60.0,105.0)),
+        "sim_capacity":float(np.clip(capacity_base,40.0,100.0)),
+        "sim_scrap":float(np.clip(D["scrap"]*100,0.0,10.0)),
+        "sim_rework":float(np.clip(rework_base,0.0,10.0)),
+        "sim_setup":float(np.clip(setup_base,5.0,max(120.0,setup_base*1.25))),
+        "sim_unplanned":0,
+        "sim_mttr":float(np.clip(mttr_base,10.0,max(180.0,mttr_base*1.25))),
+        "sim_overtime":0,
+        "sim_productivity":float(np.clip(base_productivity,5.0,35.0)),
+        "sim_headcount":0,
+        "sim_mp_specific":float(np.clip(mp_specific_base,0.80,1.20)),
+        "sim_mp_price":0.0,
+        "sim_material_loss":0,
+        "sim_energy":0.0,
+        "sim_freight":0.0,
+        "sim_otif":float(np.clip(otif_base,50.0,100.0)),
+        "sim_price":0.0,
+        "sim_mix":0.0,
+        "sim_volume":0.0,
+        "sim_fixed":0.0,
+        "sim_contracts":0.0,
+        "sim_inventory":0,
+        "sim_dpo":0,
+        "sim_dso":0,
+    }
+    for k,v in scope_targets.items():
+        if k not in st.session_state:
+            st.session_state[k]=v
+    if "sim_prod_mode" not in st.session_state:
+        st.session_state.sim_prod_mode="OEE direto"
+    if "sim_group" not in st.session_state:
+        st.session_state.sim_group="Produção"
+
+    # Header / controls
+    with st.container(border=True):
+        c1,c2,c3=st.columns([1,.33,.33],gap="small")
+        with c1:
+            st.markdown(
+                "<div class='sim-header'><div>"
+                "<div class='sim-header-title'>Simulador de Performance & Valor</div>"
+                "<div class='sim-header-sub'>Escopo oficial: 10 grupos · 26 alavancas · cálculo com dependências para evitar dupla contagem.</div>"
+                "</div><div><span class='sim-scope-chip'>MODELO v0.6.2</span></div></div>",
+                unsafe_allow_html=True
+            )
+        with c2:
+            if st.button("Cenário exemplo",use_container_width=True):
+                for k,v in scope_targets.items():
+                    st.session_state[k]=v
+                st.rerun()
+        with c3:
+            if st.button("Resetar para base",use_container_width=True):
+                for k,v in base_targets.items():
+                    st.session_state[k]=v
+                st.rerun()
+
+    # ------------------------------------------------------------------
+    # Input panel
+    # ------------------------------------------------------------------
+    left,right=st.columns([1.32,.68],gap="small")
+
     with left:
-        tabs = st.tabs(["Operação","Qualidade","Pessoas","Custos","Comercial","Capital"])
+        with st.container(border=True, height=585):
+            top1,top2=st.columns([.58,.42],gap="small")
+            groups=["Produção","Qualidade","Processo","Pessoas","Materiais","Energia","Logística","Financeiro","Estrutura","Capital"]
+            with top1:
+                group=st.selectbox("Grupo de alavancas",groups,key="sim_group")
+            with top2:
+                prod_mode=st.radio(
+                    "Motor de Produção",
+                    ["OEE direto","Drivers de OEE"],
+                    horizontal=True,
+                    key="sim_prod_mode",
+                    help="OEE direto usa o alvo de OEE como capacidade potencial. Drivers de OEE recalcula o OEE a partir de disponibilidade e performance. Os dois caminhos não são somados."
+                )
 
-        with tabs[0]:
-            a,b = st.columns(2)
-            oee = a.slider("OEE alvo (%)",60.0,95.0,max(78.0,D["oee"]*100),.5)
-            availability = b.slider("Disponibilidade alvo (%)",60.0,95.0,max(80.0,D["availability"]*100),.5)
-            c,d = st.columns(2)
-            performance = c.slider("Performance alvo (%)",70.0,105.0,max(97.0,D["performance"]*100),.5)
-            setup_reduction = d.slider("Redução de setup (%)",0,50,15)
-            e,f = st.columns(2)
-            downtime_reduction = e.slider("Redução de paradas não planejadas (%)",0,50,20)
-            capacity_util = f.slider("Utilização de capacidade (%)",50.0,95.0,80.0,.5)
+            st.markdown("---")
 
-        with tabs[1]:
-            a,b = st.columns(2)
-            scrap = a.slider("Refugo alvo (%)",0.5,8.0,min(2.5,D["scrap"]*100),.1)
-            rework = b.slider("Redução de retrabalho (%)",0,50,20)
-            c,d = st.columns(2)
-            material_loss = c.slider("Redução de perda de material (%)",0,40,15)
-            ppm = d.slider("Redução de PPM / defeitos (%)",0,50,20)
+            if group=="Produção":
+                st.markdown("<div class='lever-kicker'>PRODUÇÃO</div><div class='lever-title'>Capacidade, eficiência e volume potencial</div>",unsafe_allow_html=True)
+                a,b=st.columns(2,gap="medium")
+                with a:
+                    st.slider("OEE (%)",40.0,95.0,key="sim_oee",step=.5,disabled=(prod_mode!="OEE direto"),
+                              help="Impacto: volume, receita potencial, margem e EBITDA. No modo Drivers de OEE o resultado é calculado por disponibilidade × performance × qualidade base.")
+                    st.caption("Impacto: volume / receita / margem / EBITDA · Confiança: Alta")
+                    st.slider("Performance (%)",60.0,105.0,key="sim_performance",step=.5,disabled=(prod_mode=="OEE direto"),
+                              help="Driver do OEE. Não é somado novamente ao OEE direto.")
+                    st.caption("Impacto: produção adicional · Confiança: Alta")
+                with b:
+                    st.slider("Disponibilidade (%)",50.0,99.0,key="sim_availability",step=.5,disabled=(prod_mode=="OEE direto"),
+                              help="Driver do OEE. Processo (setup, paradas e MTTR) pode elevar a disponibilidade técnica estimada.")
+                    st.caption("Impacto: capacidade recuperada · Confiança: Alta")
+                    st.slider("Capacidade utilizada (%)",40.0,100.0,key="sim_capacity",step=.5,
+                              help="Aumentar utilização reduz custo fixo por unidade, mas não reduz automaticamente o custo fixo total. A monetização depende de volume vendido.")
+                    st.caption("Impacto: volume / absorção de custo fixo · Confiança: Média")
 
-        with tabs[2]:
-            a,b = st.columns(2)
-            overtime = a.slider("Redução de horas extras (%)",0,60,20)
-            productivity = b.slider("Ganho de produtividade (%)",0,30,8)
-            c,d = st.columns(2)
-            headcount = c.slider("Variação de headcount (%)",-20,20,0)
-            absenteeism = d.slider("Redução de absenteísmo (%)",0,30,5)
+            elif group=="Qualidade":
+                st.markdown("<div class='lever-kicker'>QUALIDADE</div><div class='lever-title'>Yield, desperdício e capacidade consumida</div>",unsafe_allow_html=True)
+                a,b=st.columns(2,gap="medium")
+                with a:
+                    st.slider("Refugo (%)",0.0,10.0,key="sim_scrap",step=.1,
+                              help="Economia de matéria-prima/custo consumido nas unidades perdidas. Não duplica a margem do volume recuperado.")
+                    st.caption("Impacto: MP / margem / EBITDA · Confiança: Alta")
+                with b:
+                    st.slider("Retrabalho (%)",0.0,10.0,key="sim_rework",step=.1,
+                              help="Reduz MOD, energia e capacidade consumida por retrabalho.")
+                    st.caption("Impacto: MOD / energia / capacidade · Confiança: Alta")
 
-        with tabs[3]:
-            a,b = st.columns(2)
-            mp_cost = a.slider("Redução no custo de MP (%)",0,15,3)
-            mp_consumption = b.slider("Redução no consumo específico de MP (%)",0,15,3)
-            c,d = st.columns(2)
-            energy = c.slider("Redução de energia / un. (%)",0,20,5)
-            fixed_cost = d.slider("Redução de custo fixo (%)",0,15,2)
-            e,f = st.columns(2)
-            freight = e.slider("Redução de frete / un. (%)",0,15,3)
-            contracts = f.slider("Redução em contratos / serviços (%)",0,20,5)
+            elif group=="Processo":
+                st.markdown("<div class='lever-kicker'>PROCESSO</div><div class='lever-title'>Tempo disponível, confiabilidade e recuperação de capacidade</div>",unsafe_allow_html=True)
+                a,b=st.columns(2,gap="medium")
+                with a:
+                    st.slider("Setup médio (min)",5.0,max(120.0,setup_base*1.25),key="sim_setup",step=1.0)
+                    st.caption("Impacto: horas disponíveis + volume · Confiança: Alta")
+                    st.slider("MTTR (min)",10.0,max(180.0,mttr_base*1.25),key="sim_mttr",step=1.0)
+                    st.caption("Impacto: tempo recuperado / disponibilidade · Confiança: Alta")
+                with b:
+                    st.slider("Redução de paradas não planejadas (%)",0,60,key="sim_unplanned",step=1)
+                    st.caption("Impacto: disponibilidade + produção · Confiança: Alta")
+                    st.markdown(
+                        "<div class='frontend-note'>Setup, paradas e MTTR alimentam a disponibilidade técnica. "
+                        "Quando Disponibilidade já foi elevada manualmente, o motor usa o maior efeito — não soma duas vezes.</div>",
+                        unsafe_allow_html=True
+                    )
 
-        with tabs[4]:
-            a,b = st.columns(2)
-            volume = a.slider("Variação de volume vendido (%)",-10,30,5)
-            price = b.slider("Variação de preço médio (%)",-5,10,2)
-            c,d = st.columns(2)
-            mix = c.slider("Ganho de margem por mix (pp)",-3.0,5.0,1.0,.1)
-            otif = d.slider("OTIF alvo (%)",70.0,100.0,95.0,.5)
+            elif group=="Pessoas":
+                st.markdown("<div class='lever-kicker'>PESSOAS</div><div class='lever-title'>Mão de obra, produtividade e dimensionamento</div>",unsafe_allow_html=True)
+                a,b=st.columns(2,gap="medium")
+                with a:
+                    st.slider("Redução de horas extras (%)",0,70,key="sim_overtime",step=1)
+                    st.caption("Impacto: MOD + EBITDA · Confiança: Alta")
+                    st.slider("Produtividade (un/h equivalente)",5.0,35.0,key="sim_productivity",step=.1,
+                              help="Antes de impactar o consolidado, o ganho é linearizado pelo mix usando HH padrão por produto.")
+                    st.caption("Impacto: capacidade / MOD · mix linearizado · Confiança: Alta")
+                with b:
+                    st.slider("Variação de headcount (pessoas)",-30,30,key="sim_headcount",step=1)
+                    st.caption(f"Impacto: custo de pessoal · premissa R$ {avg_monthly_person_cost:,.0f}/pessoa".replace(",","."))
+                    st.markdown(
+                        "<div class='frontend-note'>Headcount positivo aumenta custo; negativo gera economia. "
+                        "O modelo não recomenda corte automaticamente — apenas simula o efeito econômico.</div>",
+                        unsafe_allow_html=True
+                    )
 
-        with tabs[5]:
-            a,b = st.columns(2)
-            inventory = a.slider("Redução de estoque (%)",0,30,10)
-            wip = b.slider("Redução de WIP (%)",0,30,10)
-            c,d = st.columns(2)
-            dso = c.slider("Redução de prazo cliente (dias)",0,15,5)
-            dpo = d.slider("Aumento prazo fornecedor (dias)",0,15,5)
+            elif group=="Materiais":
+                st.markdown("<div class='lever-kicker'>MATERIAIS</div><div class='lever-title'>Consumo, preço e perdas de matéria-prima</div>",unsafe_allow_html=True)
+                a,b=st.columns(2,gap="medium")
+                with a:
+                    st.slider("Consumo específico MP (índice)",0.80,1.20,key="sim_mp_specific",step=.01,
+                              help="1,00 representa o padrão. Valores acima de 1,00 indicam sobreconsumo.")
+                    st.caption("Impacto: custo variável · Confiança: Alta")
+                    st.slider("Redução de perdas de material (%)",0,50,key="sim_material_loss",step=1)
+                    st.caption("Impacto: custo variável · Confiança: Alta")
+                with b:
+                    st.slider("Redução do preço de MP (%)",0.0,15.0,key="sim_mp_price",step=.5)
+                    st.caption("Impacto: CMV / margem · Confiança: Alta")
 
-    oee_gain = max(0,oee-D["oee"]*100)/100
-    availability_gain = max(0,availability-D["availability"]*100)/100
-    performance_gain = max(0,performance-D["performance"]*100)/100
+            elif group=="Energia":
+                st.markdown("<div class='lever-kicker'>ENERGIA</div><div class='lever-title'>Consumo específico e custo de transformação</div>",unsafe_allow_html=True)
+                st.slider("Redução de kWh/unidade (%)",0.0,30.0,key="sim_energy",step=.5)
+                st.caption("Impacto: custo de transformação / EBITDA · Confiança: Média")
+                st.markdown(
+                    "<div class='frontend-note'>O modelo usa o custo de energia real da base quando disponível. "
+                    "A evolução futura pode usar kWh/unidade equivalente por produto/linha.</div>",
+                    unsafe_allow_html=True
+                )
 
-    op_revenue = base_revenue * (
-        oee_gain*0.55 + availability_gain*0.30 + performance_gain*0.20 +
-        setup_reduction/100*0.05 + downtime_reduction/100*0.08 +
-        max(0,capacity_util-72)/100*0.08
+            elif group=="Logística":
+                st.markdown("<div class='lever-kicker'>LOGÍSTICA</div><div class='lever-title'>Custo de entrega e proteção de receita</div>",unsafe_allow_html=True)
+                a,b=st.columns(2,gap="medium")
+                with a:
+                    st.slider("Redução do frete/unidade (%)",0.0,20.0,key="sim_freight",step=.5)
+                    st.caption("Impacto: margem / EBITDA · Confiança: Alta")
+                with b:
+                    st.slider("OTIF (%)",50.0,100.0,key="sim_otif",step=.5)
+                    st.caption("Impacto: receita protegida / pedidos · Confiança: Média")
+                st.markdown(
+                    "<div class='frontend-note'>OTIF não é tratado como receita automática. O motor estima receita em risco e reconhece apenas uma parcela conservadora do valor protegido.</div>",
+                    unsafe_allow_html=True
+                )
+
+            elif group=="Financeiro":
+                st.markdown("<div class='lever-kicker'>FINANCEIRO</div><div class='lever-title'>Preço, mix e volume vendido</div>",unsafe_allow_html=True)
+                a,b=st.columns(2,gap="medium")
+                with a:
+                    st.slider("Variação do preço médio (%)",-10.0,15.0,key="sim_price",step=.5)
+                    st.caption("Impacto: receita / EBITDA · Confiança: Alta")
+                    st.slider("Variação do volume vendido (%)",-20.0,40.0,key="sim_volume",step=.5)
+                    st.caption("Impacto: receita / contribuição · limitado à capacidade")
+                with b:
+                    st.slider("Efeito de mix na margem (pp)",-5.0,8.0,key="sim_mix",step=.1)
+                    st.caption("Impacto: margem / EBITDA · Confiança: Média")
+                    st.markdown(
+                        "<div class='frontend-note'>O volume vendido monetiza a capacidade criada pelas alavancas operacionais. "
+                        "Por isso, capacidade e volume não são somados como dois EBITDAs independentes.</div>",
+                        unsafe_allow_html=True
+                    )
+
+            elif group=="Estrutura":
+                st.markdown("<div class='lever-kicker'>ESTRUTURA</div><div class='lever-title'>Custo fixo e contratos/serviços</div>",unsafe_allow_html=True)
+                a,b=st.columns(2,gap="medium")
+                with a:
+                    st.slider("Redução de custo fixo (%)",0.0,20.0,key="sim_fixed",step=.5)
+                    st.caption("Impacto: EBITDA direto · Confiança: Alta")
+                with b:
+                    st.slider("Redução de contratos/serviços (%)",0.0,30.0,key="sim_contracts",step=.5)
+                    st.caption("Impacto: SG&A / custo fabril · Confiança: Alta")
+                st.markdown(
+                    "<div class='frontend-note'>Contratos/serviços são tratados como um subconjunto da estrutura. "
+                    "A redução de custo fixo é aplicada à parcela restante para evitar dupla contagem.</div>",
+                    unsafe_allow_html=True
+                )
+
+            elif group=="Capital":
+                st.markdown("<div class='lever-kicker'>CAPITAL</div><div class='lever-title'>Capital de giro e geração de caixa</div>",unsafe_allow_html=True)
+                a,b=st.columns(2,gap="medium")
+                with a:
+                    st.slider("Redução de estoque (dias)",0,45,key="sim_inventory",step=1)
+                    st.caption("Impacto: capital de giro / caixa · Confiança: Alta")
+                    st.slider("Redução do prazo cliente (dias)",0,30,key="sim_dso",step=1)
+                    st.caption("Impacto: caixa · Confiança: Alta")
+                with b:
+                    st.slider("Aumento do prazo fornecedor (dias)",0,30,key="sim_dpo",step=1)
+                    st.caption("Impacto: caixa · Confiança: Alta")
+                    st.markdown(
+                        "<div class='frontend-note'>Capital de giro é exibido separado do EBITDA. "
+                        "Estoque usa custo diário; cliente usa receita diária; fornecedor usa compras/MP diária.</div>",
+                        unsafe_allow_html=True
+                    )
+
+    # ------------------------------------------------------------------
+    # Causal calculation engine — conservative / no double counting
+    # ------------------------------------------------------------------
+    # Process levers -> technical availability recovery
+    setup_red=max(0.0,(setup_base-st.session_state.sim_setup)/max(setup_base,1))
+    unplanned_red=max(0.0,st.session_state.sim_unplanned/100)
+    mttr_red=max(0.0,(mttr_base-st.session_state.sim_mttr)/max(mttr_base,1))
+    downtime_share=max(0.0,1-D["availability"])
+    process_recovery=downtime_share*(0.25*setup_red+0.45*unplanned_red+0.30*mttr_red)
+    derived_availability=min(0.99,D["availability"]+process_recovery)
+
+    if st.session_state.sim_prod_mode=="OEE direto":
+        oee_target=max(0.01,st.session_state.sim_oee/100)
+        process_oee=derived_availability*min(D["performance"],1.0)*D["quality"]
+        effective_oee=max(oee_target,process_oee)
+        efficiency_growth=max(0.0,safe_div(effective_oee,D["oee"])-1)
+        effective_availability=max(D["availability"],derived_availability)
+        effective_performance=D["performance"]
+    else:
+        manual_avail=st.session_state.sim_availability/100
+        effective_availability=max(manual_avail,derived_availability)
+        effective_performance=st.session_state.sim_performance/100
+        # Keep quality base here; scrap/rework value is monetized separately to avoid double count
+        effective_oee=effective_availability*min(effective_performance,1.0)*D["quality"]
+        efficiency_growth=max(0.0,safe_div(effective_oee,D["oee"])-1)
+
+    utilization_growth=max(0.0,safe_div(st.session_state.sim_capacity,capacity_base)-1)
+    output_potential_growth=max(0.0,(1+efficiency_growth)*(1+utilization_growth)-1)
+    capacity_revenue_potential=base_revenue*output_potential_growth
+    capacity_ebitda_potential=capacity_revenue_potential*base_margin
+
+    # Finance/demand: monetize only capacity that can be sold
+    requested_volume_growth=st.session_state.sim_volume/100
+    if requested_volume_growth>=0:
+        realized_volume_growth=min(requested_volume_growth,output_potential_growth if output_potential_growth>0 else requested_volume_growth)
+    else:
+        realized_volume_growth=requested_volume_growth
+    volume_revenue=base_revenue*realized_volume_growth
+    volume_ebitda=volume_revenue*base_margin
+
+    price_revenue=base_revenue*(st.session_state.sim_price/100)
+    price_ebitda=price_revenue  # price effect with constant unit variable cost
+    mix_ebitda=base_revenue*(st.session_state.sim_mix/100)
+
+    # Quality
+    scrap_reduction=max(0.0,(D["scrap"]*100-st.session_state.sim_scrap)/100)
+    scrap_saving=scrap_reduction*base_mp
+    rework_reduction=max(0.0,(rework_base-st.session_state.sim_rework)/100)
+    rework_cost_pool=base_mod+base_energy
+    rework_saving=rework_reduction*rework_cost_pool
+
+    # People
+    overtime_base_cost=max(0.0,D["overtime"]*30.0)
+    overtime_saving=overtime_base_cost*(st.session_state.sim_overtime/100)
+    prod_gain=max(0.0,safe_div(st.session_state.sim_productivity,base_productivity)-1)
+    productivity_saving=base_mod*prod_gain*0.45
+    headcount_effect=-st.session_state.sim_headcount*avg_monthly_person_cost  # negative HC => positive EBITDA
+
+    # Materials
+    mp_specific_reduction=max(0.0,(mp_specific_base-st.session_state.sim_mp_specific)/max(mp_specific_base,0.01))
+    mp_specific_saving=base_mp*mp_specific_reduction
+    mp_price_saving=base_mp*(st.session_state.sim_mp_price/100)
+    material_loss_pool=base_mp*0.04
+    material_loss_saving=material_loss_pool*(st.session_state.sim_material_loss/100)
+
+    # Energy / logistics
+    energy_saving=base_energy*(st.session_state.sim_energy/100)
+    freight_base=base_var*freight_share
+    freight_saving=freight_base*(st.session_state.sim_freight/100)
+
+    otif_gap=max(1.0,100-otif_base)
+    otif_improvement=max(0.0,st.session_state.sim_otif-otif_base)
+    protected_revenue=base_revenue*otif_risk_share*min(1.0,otif_improvement/otif_gap)
+    recognized_otif_revenue=protected_revenue*0.70
+    otif_ebitda=recognized_otif_revenue*base_margin
+
+    # Structure — contracts separated from remainder
+    contracts_base=base_fixed*contracts_share
+    fixed_ex_contracts=max(0.0,base_fixed-contracts_base)
+    contracts_saving=contracts_base*(st.session_state.sim_contracts/100)
+    fixed_saving=fixed_ex_contracts*(st.session_state.sim_fixed/100)
+
+    # Capital / cash
+    inventory_release=(base_var/period_days)*st.session_state.sim_inventory
+    supplier_release=(base_mp/period_days)*st.session_state.sim_dpo
+    customer_release=(base_revenue/period_days)*st.session_state.sim_dso
+    working_capital_release=inventory_release+supplier_release+customer_release
+
+    # Additive EBITDA — no duplicate capacity attribution
+    cost_savings=(
+        scrap_saving+rework_saving+overtime_saving+productivity_saving+headcount_effect+
+        mp_specific_saving+mp_price_saving+material_loss_saving+energy_saving+
+        freight_saving+contracts_saving+fixed_saving
     )
-    quality_saving = (
-        max(0,D["scrap"]*100-scrap)/100 * base_var * 0.55 +
-        rework/100 * base_var * 0.025 +
-        material_loss/100 * base_var * 0.035 +
-        ppm/100 * base_var * 0.015
+    revenue_add=volume_revenue+price_revenue+recognized_otif_revenue
+    ebitda_gain=volume_ebitda+price_ebitda+mix_ebitda+otif_ebitda+cost_savings
+    simulated_revenue=base_revenue+revenue_add
+    simulated_ebitda=base_ebitda+ebitda_gain
+    contribution_gain=(
+        volume_ebitda+price_ebitda+mix_ebitda+otif_ebitda+
+        scrap_saving+rework_saving+mp_specific_saving+mp_price_saving+
+        material_loss_saving+energy_saving+freight_saving
     )
-    people_saving = (
-        overtime/100 * max(1,D["overtime"]*30) +
-        productivity/100 * base_var * 0.06 -
-        headcount/100 * base_fixed * 0.35 +
-        absenteeism/100 * base_var * 0.015
-    )
-    cost_saving = (
-        mp_cost/100 * base_var * 0.58 +
-        mp_consumption/100 * base_var * 0.58 +
-        energy/100 * base_var * 0.10 +
-        fixed_cost/100 * base_fixed +
-        freight/100 * base_var * 0.07 +
-        contracts/100 * base_fixed * 0.22
-    )
-    commercial_revenue = base_revenue * (volume/100 + price/100)
-    mix_gain = base_revenue * (mix/100)
-    otif_gain = base_revenue * max(0,otif-89)/100 * 0.08
-    working_capital = (
-        inventory/100 * base_var * 0.35 +
-        wip/100 * base_var * 0.10 +
-        dso/365 * base_revenue +
-        dpo/365 * base_var
-    )
+    simulated_contribution=base_revenue*base_margin+contribution_gain
+    simulated_margin=safe_div(simulated_contribution,simulated_revenue)
 
-    simulated_revenue = base_revenue + op_revenue + commercial_revenue + otif_gain
-    ebitda_gain = quality_saving + people_saving + cost_saving + mix_gain + op_revenue*base_margin + commercial_revenue*base_margin + otif_gain*base_margin
-    simulated_ebitda = base_ebitda + ebitda_gain
-    simulated_margin = safe_div(simulated_ebitda, simulated_revenue) if simulated_revenue else 0
+    # Simulated fixed-cost absorption: same fixed cost divided by higher sold output, net of explicit structural savings
+    base_fixed_per_unit=safe_div(base_fixed,D["actual"])
+    simulated_units=max(1,D["actual"]*(1+realized_volume_growth))
+    simulated_fixed_total=max(0,base_fixed-contracts_saving-fixed_saving)
+    simulated_fixed_per_unit=safe_div(simulated_fixed_total,simulated_units)
+    absorption_gain=max(0,base_fixed_per_unit-simulated_fixed_per_unit)
 
+    # ------------------------------------------------------------------
+    # Value attribution table
+    # Production/process levers = enabling value; additive lines = bridge value
+    # ------------------------------------------------------------------
+    enable_pool=capacity_ebitda_potential
+    enable_weights={}
+    if st.session_state.sim_prod_mode=="OEE direto":
+        enable_weights["OEE"]=max(0,efficiency_growth)
+    else:
+        avail_gain=max(0,effective_availability-D["availability"])
+        perf_gain=max(0,effective_performance-D["performance"])
+        enable_weights["Disponibilidade"]=avail_gain
+        enable_weights["Performance"]=perf_gain
+        # Attribute the process-derived part within availability
+        if process_recovery>0:
+            enable_weights["Setup médio"]=process_recovery*0.25*setup_red
+            enable_weights["Paradas não planejadas"]=process_recovery*0.45*unplanned_red
+            enable_weights["MTTR"]=process_recovery*0.30*mttr_red
+    enable_weights["Capacidade utilizada"]=max(0,utilization_growth)
+    total_enable_weight=sum(enable_weights.values()) or 1.0
+
+    breakdown=[]
+    for lever,w in enable_weights.items():
+        breakdown.append([lever,enable_pool*w/total_enable_weight,"Valor habilitado","Alta" if lever!="Capacidade utilizada" else "Média"])
+
+    additive_lines=[
+        ("Refugo",scrap_saving,"EBITDA","Alta"),
+        ("Retrabalho",rework_saving,"EBITDA","Alta"),
+        ("Horas extras",overtime_saving,"EBITDA","Alta"),
+        ("Produtividade",productivity_saving,"EBITDA","Alta"),
+        ("Headcount",headcount_effect,"EBITDA","Alta"),
+        ("Consumo específico MP",mp_specific_saving,"EBITDA","Alta"),
+        ("Preço de MP",mp_price_saving,"EBITDA","Alta"),
+        ("Perdas de material",material_loss_saving,"EBITDA","Alta"),
+        ("kWh/unidade",energy_saving,"EBITDA","Média"),
+        ("Frete/unidade",freight_saving,"EBITDA","Alta"),
+        ("OTIF",otif_ebitda,"EBITDA / Receita protegida","Média"),
+        ("Preço médio",price_ebitda,"EBITDA","Alta"),
+        ("Mix de produtos",mix_ebitda,"EBITDA","Média"),
+        ("Volume vendido",volume_ebitda,"EBITDA","Alta"),
+        ("Custo fixo",fixed_saving,"EBITDA","Alta"),
+        ("Contratos/serviços",contracts_saving,"EBITDA","Alta"),
+        ("Estoque",inventory_release,"Caixa","Alta"),
+        ("Prazo fornecedor",supplier_release,"Caixa","Alta"),
+        ("Prazo cliente",customer_release,"Caixa","Alta"),
+    ]
+    breakdown.extend(additive_lines)
+    breakdown_df=pd.DataFrame(breakdown,columns=["Alavanca","Impacto_R$","Tipo","Confiança"])
+    breakdown_df["AbsImpact"]=breakdown_df["Impacto_R$"].abs()
+    breakdown_df=breakdown_df.sort_values("AbsImpact",ascending=False).drop(columns=["AbsImpact"])
+
+    active_count=int((breakdown_df["Impacto_R$"].abs()>1).sum())
+
+    # ------------------------------------------------------------------
+    # Impact panel
+    # ------------------------------------------------------------------
     with right:
-        with st.container(border=True):
-            panel_title("Impacto do Cenário","Base x simulado")
-            st.markdown(f"""
-            <div class="scenario-card">
-              <div class="scenario-label">Receita</div>
-              <div class="scenario-value">{fmt_money(simulated_revenue)}</div>
-              <div class="scenario-delta">Δ {fmt_money(simulated_revenue-base_revenue)}</div>
-            </div>
-            <div style="height:8px"></div>
-            <div class="scenario-card">
-              <div class="scenario-label">Margem estimada</div>
-              <div class="scenario-value">{fmt_pct(simulated_margin)}</div>
-              <div class="scenario-delta">base {fmt_pct(base_margin)}</div>
-            </div>
-            <div style="height:8px"></div>
-            <div class="scenario-card">
-              <div class="scenario-label">EBITDA</div>
-              <div class="scenario-value">{fmt_money(simulated_ebitda)}</div>
-              <div class="scenario-delta">Δ {fmt_money(ebitda_gain)}</div>
-            </div>
-            <div style="height:8px"></div>
-            <div class="scenario-card">
-              <div class="scenario-label">Capital de giro liberado</div>
-              <div class="scenario-value">{fmt_money(working_capital)}</div>
-              <div class="scenario-delta">efeito caixa, não EBITDA</div>
-            </div>
-            """, unsafe_allow_html=True)
+        with st.container(border=True, height=585):
+            panel_title("Impacto do Cenário",f"{active_count} alavancas com efeito econômico no cenário")
+            c1,c2=st.columns(2,gap="small")
+            with c1:
+                st.markdown(
+                    f"<div class='sim-card'><div class='sim-card-label'>Receita simulada</div>"
+                    f"<div class='sim-card-value'>{fmt_money(simulated_revenue)}</div>"
+                    f"<div class='sim-card-delta' style='color:{GREEN if revenue_add>=0 else RED}'>Δ {fmt_money(revenue_add)}</div></div>",
+                    unsafe_allow_html=True
+                )
+            with c2:
+                st.markdown(
+                    f"<div class='sim-card'><div class='sim-card-label'>EBITDA simulado</div>"
+                    f"<div class='sim-card-value'>{fmt_money(simulated_ebitda)}</div>"
+                    f"<div class='sim-card-delta' style='color:{GREEN if ebitda_gain>=0 else RED}'>Δ {fmt_money(ebitda_gain)}</div></div>",
+                    unsafe_allow_html=True
+                )
+            st.write("")
+            c1,c2=st.columns(2,gap="small")
+            with c1:
+                st.markdown(
+                    f"<div class='sim-card'><div class='sim-card-label'>Margem estimada</div>"
+                    f"<div class='sim-card-value'>{fmt_pct(simulated_margin)}</div>"
+                    f"<div class='sim-card-delta' style='color:{GREEN if simulated_margin>=base_margin else RED}'>base {fmt_pct(base_margin)}</div></div>",
+                    unsafe_allow_html=True
+                )
+            with c2:
+                st.markdown(
+                    f"<div class='sim-card'><div class='sim-card-label'>Capital de giro liberado</div>"
+                    f"<div class='sim-card-value'>{fmt_money(working_capital_release)}</div>"
+                    f"<div class='sim-card-delta' style='color:{BLUE}'>efeito caixa</div></div>",
+                    unsafe_allow_html=True
+                )
+
+            st.write("")
+            st.markdown(
+                f"<div class='lever-shell'>"
+                f"<div class='lever-kicker'>CAPACIDADE</div>"
+                f"<div class='lever-title'>Valor potencial habilitado: {fmt_money(capacity_ebitda_potential)}</div>"
+                f"<div class='lever-meta'>OEE efetivo {effective_oee:.1%} · utilização {st.session_state.sim_capacity:.1f}% · "
+                f"potencial de volume {output_potential_growth:.1%}. Esse valor não é somado novamente ao EBITDA se o volume vendido já o monetiza.</div>"
+                f"</div>",
+                unsafe_allow_html=True
+            )
+            st.write("")
+            st.markdown(
+                f"<div class='lever-shell'>"
+                f"<div class='lever-kicker'>ABSORÇÃO</div>"
+                f"<div class='lever-title'>Custo fixo/un: {fmt_money(base_fixed_per_unit,2)} → {fmt_money(simulated_fixed_per_unit,2)}</div>"
+                f"<div class='lever-meta'>Ganho de absorção: {fmt_money(absorption_gain,2)}/un. A utilização maior não reduz o custo fixo total por si só.</div>"
+                f"</div>",
+                unsafe_allow_html=True
+            )
+
+    # ------------------------------------------------------------------
+    # Bridge + value map
+    # ------------------------------------------------------------------
+    st.write("")
+    c1,c2=st.columns([1.08,.92],gap="small")
+    with c1:
+        with st.container(border=True, height=410):
+            panel_title("Bridge de EBITDA","Somente impactos aditivos — sem dupla contagem")
+            bridge={
+                "Volume vendido":volume_ebitda,
+                "Preço":price_ebitda,
+                "Mix":mix_ebitda,
+                "Qualidade":scrap_saving+rework_saving,
+                "Pessoas":overtime_saving+productivity_saving+headcount_effect,
+                "Materiais":mp_specific_saving+mp_price_saving+material_loss_saving,
+                "Energia/Logística":energy_saving+freight_saving+otif_ebitda,
+                "Estrutura":fixed_saving+contracts_saving,
+            }
+            bridge={k:v for k,v in bridge.items() if abs(v)>1}
+            x=["EBITDA Atual"]+list(bridge.keys())+["EBITDA Simulado"]
+            measures=["absolute"]+["relative"]*len(bridge)+["total"]
+            y=[base_ebitda]+list(bridge.values())+[0]
+            fig=go.Figure(go.Waterfall(
+                x=x,measure=measures,y=y,
+                increasing={"marker":{"color":GREEN}},
+                decreasing={"marker":{"color":RED}},
+                totals={"marker":{"color":BLUE}},
+                connector={"line":{"color":"#BBC8D3","width":1}}
+            ))
+            fig.update_layout(
+                height=335,margin=dict(l=5,r=5,t=10,b=55),
+                paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="rgba(0,0,0,0)",
+                yaxis=dict(gridcolor="#EFF3F7",tickfont=dict(size=9)),
+                xaxis=dict(tickfont=dict(size=9),tickangle=-20,automargin=True),
+                showlegend=False
+            )
+            st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
+
+    with c2:
+        with st.container(border=True, height=410):
+            panel_title("Mapa de Valor","Impacto por alavanca e natureza do valor")
+            show=breakdown_df[breakdown_df["Impacto_R$"].abs()>1].head(10).copy()
+            show["Impacto"]=show["Impacto_R$"].map(lambda x:fmt_money(x))
+            show=show[["Alavanca","Tipo","Impacto","Confiança"]]
+            st.dataframe(
+                show,use_container_width=True,hide_index=True,height=335,
+                column_config={
+                    "Alavanca":st.column_config.TextColumn("Alavanca",width="medium"),
+                    "Tipo":st.column_config.TextColumn("Natureza",width="medium"),
+                    "Impacto":st.column_config.TextColumn("Impacto",width="medium"),
+                    "Confiança":st.column_config.TextColumn("Confiança",width="small"),
+                }
+            )
 
     st.write("")
     with st.container(border=True):
-        panel_title("Bridge do Cenário","Contribuição estimada das principais alavancas")
-        components = {
-            "Operação": op_revenue*base_margin,
-            "Qualidade": quality_saving,
-            "Pessoas": people_saving,
-            "Custos": cost_saving,
-            "Comercial": commercial_revenue*base_margin + mix_gain + otif_gain*base_margin,
-        }
-        x = ["EBITDA Atual"] + list(components.keys()) + ["EBITDA Simulado"]
-        measures = ["absolute"] + ["relative"]*len(components) + ["total"]
-        y = [base_ebitda] + list(components.values()) + [0]
-        fig = go.Figure(go.Waterfall(
-            x=x,measure=measures,y=y,
-            increasing={"marker":{"color":GREEN}},
-            decreasing={"marker":{"color":RED}},
-            totals={"marker":{"color":BLUE}},
-            connector={"line":{"color":"#B8C4CE","width":1}}
-        ))
-        fig.update_layout(
-            height=310, margin=dict(l=0,r=0,t=10,b=5),
-            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-            yaxis=dict(gridcolor="#EFF3F7",tickfont=dict(size=9)),
-            xaxis=dict(tickfont=dict(size=9)),
-            showlegend=False
-        )
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar":False})
+        c1,c2=st.columns([1,.33],gap="small")
+        with c1:
+            st.markdown(
+                "<div class='frontend-note'><b>Regra do motor:</b> capacidade operacional pode habilitar receita, mas só entra no EBITDA quando existe volume vendido para monetizá-la. "
+                "OEE não é somado com seus drivers; setup/paradas/MTTR alimentam disponibilidade; contratos são separados do restante do custo fixo; capital de giro fica fora do EBITDA.</div>",
+                unsafe_allow_html=True
+            )
+        with c2:
+            if st.button("Transformar cenário em Plano de Captura",type="primary",use_container_width=True):
+                top_actions=breakdown_df[
+                    (breakdown_df["Impacto_R$"]>1) &
+                    (breakdown_df["Tipo"].str.contains("EBITDA|Valor habilitado",regex=True))
+                ].head(5)
 
-    st.write("")
-    c1, c2 = st.columns([1,.45])
-    with c1:
-        st.caption("Simulação gerencial. Os coeficientes serão calibrados por cliente/planta quando houver histórico real.")
-    with c2:
-        if st.button("Transformar cenário em Plano de Captura", type="primary", use_container_width=True):
-            new_actions = pd.DataFrame([
-                ["Alta","Cenário: Operação","Executar plano de recuperação de OEE/disponibilidade","Ger. Industrial","30 dias",fmt_money(max(0,components["Operação"])),"Planejado"],
-                ["Alta","Cenário: Qualidade","Executar plano de redução de perdas e refugo","Ger. Qualidade","45 dias",fmt_money(max(0,components["Qualidade"])),"Planejado"],
-                ["Média","Cenário: Custos","Executar plano de eficiência de custos","Controller / Operações","60 dias",fmt_money(max(0,components["Custos"])),"Planejado"],
-            ], columns=st.session_state.actions.columns)
-            st.session_state.actions = pd.concat([st.session_state.actions,new_actions],ignore_index=True)
-            nav("Plano de Ação")
+                owner_map={
+                    "OEE":"Ger. Industrial","Disponibilidade":"Ger. Manutenção","Performance":"Ger. Produção",
+                    "Capacidade utilizada":"Ger. Industrial","Setup médio":"Engenharia de Processos",
+                    "Paradas não planejadas":"Ger. Manutenção","MTTR":"Ger. Manutenção",
+                    "Refugo":"Ger. Qualidade","Retrabalho":"Ger. Qualidade",
+                    "Horas extras":"Ger. Produção","Produtividade":"Ger. Produção","Headcount":"Ger. Industrial",
+                    "Consumo específico MP":"Engenharia de Processos","Preço de MP":"Controller / Operações",
+                    "Perdas de material":"Ger. Qualidade","kWh/unidade":"Ger. Industrial",
+                    "Frete/unidade":"Controller / Operações","OTIF":"Ger. Produção",
+                    "Preço médio":"Controller / Operações","Mix de produtos":"Controller / Operações",
+                    "Volume vendido":"Ger. Industrial","Custo fixo":"Controller / Operações",
+                    "Contratos/serviços":"Controller / Operações"
+                }
+                action_map={
+                    "OEE":"Executar plano para atingir o OEE simulado, detalhando perdas de disponibilidade, performance e qualidade.",
+                    "Disponibilidade":"Atacar as maiores perdas de disponibilidade e equipamentos críticos.",
+                    "Performance":"Eliminar perdas de velocidade e microparadas versus padrão.",
+                    "Capacidade utilizada":"Converter capacidade disponível em volume vendável sem aumentar estrutura fixa.",
+                    "Setup médio":"Aplicar SMED e preparação externa nos setups prioritários.",
+                    "Paradas não planejadas":"Plano de confiabilidade para reduzir paradas não planejadas.",
+                    "MTTR":"Reduzir tempo de reparo com padrão de atendimento, sobressalentes e troubleshooting.",
+                    "Refugo":"Pareto de refugo por produto/causa e ajuste de parâmetros de processo.",
+                    "Retrabalho":"Eliminar causas de retrabalho e recuperar MOD/energia/capacidade.",
+                    "Horas extras":"Rebalancear escala e capacidade para reduzir hora extra sem perder volume.",
+                    "Produtividade":"Atacar perdas de HH usando produtividade linearizada pelo mix.",
+                    "Headcount":"Revisar dimensionamento e capacidade antes de qualquer alteração de quadro.",
+                    "Consumo específico MP":"Comparar consumo real x padrão e atacar sobreconsumo por SKU/processo.",
+                    "Preço de MP":"Executar sourcing/negociação para capturar redução de preço de matéria-prima.",
+                    "Perdas de material":"Reduzir perdas de processo fora do refugo já contabilizado.",
+                    "kWh/unidade":"Atacar consumo específico de energia por linha/produto.",
+                    "Frete/unidade":"Rever malha, ocupação, frequência e contratação para reduzir frete/unidade.",
+                    "OTIF":"Atacar restrições de PCP, material e expedição que comprometem entrega.",
+                    "Preço médio":"Executar plano de preço preservando elasticidade e volume.",
+                    "Mix de produtos":"Aumentar participação de produtos/famílias de maior margem.",
+                    "Volume vendido":"Converter capacidade em vendas adicionais respeitando demanda e margem.",
+                    "Custo fixo":"Revisar estrutura e capacidade ociosa para capturar redução sustentável.",
+                    "Contratos/serviços":"Renegociar, redimensionar ou eliminar contratos sem retorno adequado."
+                }
+                rows=[]
+                for _,r in top_actions.iterrows():
+                    lever=r["Alavanca"]
+                    owner=owner_map.get(lever,"Ger. Industrial")
+                    rows.append([
+                        "Alta" if r["Impacto_R$"]>=top_actions["Impacto_R$"].median() else "Média",
+                        f"Cenário: {lever}",
+                        action_map.get(lever,f"Executar plano de captura da alavanca {lever}."),
+                        owner,owner_email(owner),"45 dias",fmt_money(r["Impacto_R$"]),"Planejado"
+                    ])
+                if rows:
+                    new_actions=pd.DataFrame(rows,columns=st.session_state.actions.columns)
+                    st.session_state.actions=pd.concat([st.session_state.actions,new_actions],ignore_index=True)
+                nav("Plano de Ação")
+
 
 elif page == "Plano de Ação":
-    page_header("Plano de Ação","Responsabilidade, prazo e captura de valor.")
-    st.dataframe(st.session_state.actions, use_container_width=True, hide_index=True)
+    page_header("Plano de Ação","Responsabilidade, prazo, comunicação e captura de valor.")
+
+    with st.container(border=True):
+        panel_title("Ações em acompanhamento","Edite responsável, e-mail, prazo e status diretamente na tabela")
+        edited=st.data_editor(
+            st.session_state.actions,
+            use_container_width=True,hide_index=True,num_rows="dynamic",
+            height=320,key="actions_editor",
+            column_config={
+                "Prioridade":st.column_config.SelectboxColumn("Prioridade",options=["Alta","Média","Baixa"],width="small"),
+                "Problema":st.column_config.TextColumn("Problema / oportunidade",width="medium"),
+                "Ação":st.column_config.TextColumn("Ação",width="large"),
+                "Responsável":st.column_config.TextColumn("Responsável",width="medium"),
+                "E-mail":st.column_config.TextColumn("E-mail",width="medium"),
+                "Prazo":st.column_config.TextColumn("Prazo",width="small"),
+                "Impacto":st.column_config.TextColumn("Impacto",width="medium"),
+                "Status":st.column_config.SelectboxColumn("Status",options=["Não iniciado","Planejado","Em andamento","Concluído","Bloqueado"],width="medium"),
+            }
+        )
+        st.session_state.actions=edited
+
     st.write("")
-    with st.form("action_form", clear_on_submit=True):
-        a,b = st.columns(2)
-        problema = a.text_input("Problema / oportunidade")
-        responsavel = b.text_input("Responsável")
-        acao = st.text_area("Ação recomendada")
-        c,d,e = st.columns(3)
-        prazo = c.text_input("Prazo", placeholder="dd/mm/aaaa")
-        prioridade = d.selectbox("Prioridade", ["Alta","Média","Baixa"])
-        impacto = e.text_input("Impacto esperado", placeholder="R$ 100 mil")
-        ok = st.form_submit_button("Adicionar ação", type="primary")
-        if ok and problema and acao:
-            new = pd.DataFrame([[prioridade,problema,acao,responsavel,prazo,impacto,"Planejado"]],
-                               columns=st.session_state.actions.columns)
-            st.session_state.actions = pd.concat([st.session_state.actions,new], ignore_index=True)
-            st.success("Ação adicionada ao plano.")
-            st.rerun()
+    c1,c2=st.columns([1.15,.85],gap="small")
+
+    with c1:
+        with st.container(border=True):
+            panel_title("Adicionar nova ação","Cadastre a ação e o e-mail do responsável")
+            with st.form("action_form", clear_on_submit=True):
+                a,b=st.columns(2)
+                problema=a.text_input("Problema / oportunidade")
+                responsavel=b.text_input("Responsável")
+                email=st.text_input("E-mail do responsável",placeholder="nome@empresa.com")
+                acao=st.text_area("Ação recomendada")
+                c,d,e=st.columns(3)
+                prazo=c.text_input("Prazo",placeholder="dd/mm/aaaa")
+                prioridade=d.selectbox("Prioridade",["Alta","Média","Baixa"])
+                impacto=e.text_input("Impacto esperado",placeholder="R$ 100 mil")
+                ok=st.form_submit_button("Adicionar ação",type="primary")
+                if ok and problema and acao:
+                    new=pd.DataFrame(
+                        [[prioridade,problema,acao,responsavel,email,prazo,impacto,"Planejado"]],
+                        columns=st.session_state.actions.columns
+                    )
+                    st.session_state.actions=pd.concat([st.session_state.actions,new],ignore_index=True)
+                    st.success("Ação adicionada ao plano.")
+                    st.rerun()
+
+    with c2:
+        with st.container(border=True):
+            panel_title("Comunicar responsável","Prepare o e-mail da ação selecionada")
+            if len(st.session_state.actions):
+                labels=[
+                    f"{i+1}. {row['Problema']} - {row['Responsável']}"
+                    for i,(_,row) in enumerate(st.session_state.actions.iterrows())
+                ]
+                selected=st.selectbox("Ação",options=list(range(len(labels))),format_func=lambda i:labels[i])
+                row=st.session_state.actions.iloc[selected]
+                st.markdown(
+                    f"<div class='email-note'><b>Responsável:</b> {row['Responsável']}<br>"
+                    f"<b>E-mail:</b> {row['E-mail'] if str(row['E-mail']).strip() else 'não cadastrado'}<br>"
+                    f"<b>Prazo:</b> {row['Prazo']}<br><b>Impacto:</b> {row['Impacto']}</div>",
+                    unsafe_allow_html=True
+                )
+                st.write("")
+                email_ok="@" in str(row["E-mail"])
+                if email_ok:
+                    st.link_button("Preparar e-mail no Outlook",action_mailto(row),use_container_width=True)
+                else:
+                    st.button("Cadastre o e-mail para enviar",disabled=True,use_container_width=True)
+                st.markdown(
+                    "<div class='report-note'>Nesta versão o botão abre a mensagem pronta no Outlook/cliente de e-mail. "
+                    "Para envio automático pelo sistema, a integração recomendada é Microsoft Graph com autenticação segura.</div>",
+                    unsafe_allow_html=True
+                )
+
 
 elif page == "Agente de Performance":
     page_header("Agente de Performance","Pergunte aos dados e transforme análise em decisão.")
