@@ -1,32 +1,23 @@
-# Industrial Performance SaaS — H2M | Flat v0.2
+# Industrial Performance v0.3 Refined
 
-Esta versão foi preparada para GitHub com todos os arquivos na raiz.
+Versão redesenhada para Streamlit, com:
+- navegação lateral funcional;
+- botões de drill-down funcionais;
+- simulador de alavancas;
+- plano de ação funcional;
+- chat básico do agente;
+- relatório para download;
+- layout visual refinado;
+- regra de cores dos KPIs:
+  - vermelho: < -10%
+  - laranja: -10% a <0%
+  - verde: >=0%
 
-## Arquivos esperados na raiz
-- app.py
-- cockpit.py
-- operations.py
-- diagnostics.py
-- finance.py
-- levers.py
-- actions.py
-- agent.py
-- reports.py
-- settings.py
-- styles.py
-- components.py
-- demo.py
-- logo_h2m_blue.jpeg
+## GitHub
+Substitua `app.py` e `requirements.txt` pelos arquivos desta versão.
+Mantenha os logos na raiz:
 - logo_h2m_white.jpeg
-- requirements.txt
+- logo_h2m_blue.jpeg
 
-## Publicar no Streamlit
-O Main file path continua sendo:
-
-app.py
-
-Depois de fazer commit no GitHub, o Streamlit deve atualizar automaticamente.
-
-## Rodar localmente
-pip install -r requirements.txt
-streamlit run app.py
+Main file path no Streamlit:
+`app.py`
