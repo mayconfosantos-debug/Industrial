@@ -2,9 +2,9 @@
 import streamlit as st
 from pathlib import Path
 
-from ui.styles import inject_css
-from data.demo import get_demo
-from modules import cockpit, operations, diagnostics, finance, levers, actions, agent, reports, settings
+from styles import inject_css
+from demo import get_demo
+import cockpit, operations, diagnostics, finance, levers, actions, agent, reports, settings
 
 st.set_page_config(
     page_title="Industrial Performance | H2M",
@@ -16,7 +16,7 @@ inject_css()
 d = get_demo()
 
 with st.sidebar:
-    logo = Path(__file__).parent / "assets" / "logo_h2m_white.jpeg"
+    logo = Path(__file__).parent / "logo_h2m_white.jpeg"
     if logo.exists():
         st.image(str(logo), width=150)
     st.markdown(

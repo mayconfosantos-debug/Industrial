@@ -1,6 +1,6 @@
 
 import streamlit as st
-from ui.styles import page_header
+from styles import page_header
 
 def render(d):
     page_header("Configurações","Cadastros, metas, estrutura de custos, importação e regras do modelo.")

@@ -1,8 +1,8 @@
 
 import streamlit as st
 import pandas as pd
-from ui.styles import page_header
-from ui.components import top_filters
+from styles import page_header
+from components import top_filters
 
 def render(d):
     top_filters()

@@ -1,7 +1,7 @@
 
 import streamlit as st
 import pandas as pd
-from .styles import RED, ORANGE, GREEN, CYAN, BLUE, NAVY, TEXT, MUTED, BORDER, status_color
+from styles import RED, ORANGE, GREEN, CYAN, BLUE, NAVY, TEXT, MUTED, BORDER, status_color
 
 def top_filters():
     c1,c2,c3,c4 = st.columns([1.15,1.15,.9,2.8])

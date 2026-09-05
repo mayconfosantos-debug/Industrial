@@ -1,8 +1,8 @@
 
 import streamlit as st
 import plotly.express as px
-from ui.styles import page_header, RED, ORANGE, BLUE
-from ui.components import top_filters
+from styles import page_header, RED, ORANGE, BLUE
+from components import top_filters
 
 def render(d):
     top_filters()

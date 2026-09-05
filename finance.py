@@ -3,8 +3,8 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
-from ui.styles import page_header, BLUE, RED, GREEN, ORANGE
-from ui.components import top_filters
+from styles import page_header, BLUE, RED, GREEN, ORANGE
+from components import top_filters
 
 def render(d):
     top_filters()

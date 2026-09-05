@@ -2,8 +2,8 @@
 import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
-from ui.styles import page_header, card_html, status_color, CYAN, BLUE, NAVY, RED, ORANGE, GREEN, MUTED
-from ui.components import top_filters, kpi_table_html, alert_html, priority_badge
+from styles import page_header, card_html, status_color, CYAN, BLUE, NAVY, RED, ORANGE, GREEN, MUTED
+from components import top_filters, kpi_table_html, alert_html, priority_badge
 
 def render(d):
     top_filters()
