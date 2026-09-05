@@ -1,4 +1,4 @@
-# Industrial Performance — v0.6.2 Front-end Premium
+# Industrial Performance — v0.6.2.1 Hotfix
 
 ## Escopo desta versão
 Esta versão preserva o escopo oficial do Simulador:
@@ -62,3 +62,11 @@ Opcionalmente suba também:
 
 Main file path:
 app.py
+
+
+## Hotfix v0.6.2.1
+- Corrigido NameError no carregamento do app.
+- Causa: regras CSS da v0.6.1/v0.6.2 estavam com chaves simples dentro de um f-string do Python.
+- Todas as chaves CSS foram escapadas corretamente.
+- Escopo funcional permanece igual: 10 grupos e 26 alavancas.
+- Nenhuma regra de negócio do simulador foi removida.
