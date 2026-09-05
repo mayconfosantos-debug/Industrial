@@ -1,42 +1,40 @@
-# Industrial Performance v0.4 PRO
+# Industrial Performance Platform — v0.5 Product Experience
 
-Esta versão corrige o layout e torna o upload de Excel funcional.
+## Principais mudanças
+- Sidebar reorganizada em grupos e com branding mais discreto.
+- Logo H2M reduzido e integrado ao produto.
+- Grid do cockpit revisado.
+- Cards e painéis mais simétricos.
+- Gráficos com menos ruído visual.
+- Simulador 2.0 com 6 categorias de alavancas:
+  - Operação
+  - Qualidade
+  - Pessoas
+  - Custos
+  - Comercial
+  - Capital
+- Painel Base x Simulado.
+- Bridge do cenário.
+- Capital de giro separado de EBITDA.
+- Botão para transformar cenário em Plano de Captura.
+- Upload de Excel com validação e preview.
 
-## O que mudou
-- grid visual mais simétrico;
-- cards com altura fixa;
-- labels curtas para evitar quebra de linha;
-- gráficos redesenhados com menos ruído visual;
-- navegação lateral funcional;
-- botões de drill-down funcionais;
-- plano de ação funcional;
-- simulador funcional;
-- agente básico funcional;
-- relatório para download;
-- upload REAL: o Excel validado recalcula o cockpit.
-
-## Upload
-Use `industrial_performance_exemplo_v04.xlsx` para testar.
-
-Abas reconhecidas:
-- Producao
-- Qualidade
-- Manutencao
-- Pessoas
-- Custos
-- Metas (opcional)
-
-## GitHub / Streamlit
+## Arquivos para subir no GitHub
 Substitua:
 - app.py
 - requirements.txt
 - README.md
 
-Mantenha:
+Mantenha na raiz:
 - logo_h2m_white.jpeg
 - logo_h2m_blue.jpeg
 
-Você também pode subir o Excel de exemplo para ter uma base de teste disponível no repositório.
+Opcional:
+- industrial_performance_exemplo_v05.xlsx
 
+## Streamlit
 Main file path:
 app.py
+
+Depois do commit:
+Manage app → Reboot app
