@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 from pathlib import Path
 from io import BytesIO
 import unicodedata
+import base64
 from urllib.parse import quote
 
 from reportlab.lib import colors
@@ -1488,13 +1489,25 @@ D = calculate_real(st.session_state.real_data) if st.session_state.real_data els
 # SIDEBAR
 # ============================================================
 with st.sidebar:
-    c1, c2 = st.columns([.20, .80], gap="small")
-    logo = Path(__file__).parent / "logo_h2m_white.jpeg"
+    c1, c2 = st.columns([.34, .66], gap="small")
+    logo = Path(__file__).parent / "logo_h2m_transparent.png"
     with c1:
         if logo.exists():
-            st.image(str(logo), width=46)
+            logo_b64 = base64.b64encode(logo.read_bytes()).decode("ascii")
+            st.markdown(
+                f'<a href="https://h2mconsulting.com.br" target="_blank" rel="noopener noreferrer" '
+                f'title="Abrir H2M Consulting">'
+                f'<img src="data:image/png;base64,{logo_b64}" alt="H2M Consulting" '
+                f'style="width:76px;max-width:100%;height:auto;display:block;margin-top:1px;">'
+                f'</a>',
+                unsafe_allow_html=True
+            )
     with c2:
-        st.markdown('<div class="brand-title">Industrial Performance</div><div class="brand-sub">by H2M Consulting</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="brand-title" style="padding-top:4px">Industrial Performance</div>'
+            '<div class="brand-sub">by H2M Consulting</div>',
+            unsafe_allow_html=True
+        )
 
     groups = [
         ("VISÃO", ["Cockpit Executivo","Performance Operacional","Diagnóstico e Causas"]),

@@ -83,3 +83,11 @@ app.py
 - Todas as chaves do CSS do hotfix da sidebar foram escapadas corretamente para uso dentro do f-string.
 - Auditoria do bloco de tema confirmou que as únicas expressões f-string restantes são as variáveis de tema esperadas.
 - Mantido o menu alinhado à esquerda.
+
+
+## v0.6.2.4 — Logo H2M
+- Logo H2M trocado por versão branca com fundo transparente.
+- Removido o bloco branco visual do logo na sidebar.
+- Logo agora é clicável.
+- Clique abre https://h2mconsulting.com.br em nova aba.
+- Menu lateral permanece alinhado à esquerda.
