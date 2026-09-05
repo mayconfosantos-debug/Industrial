@@ -1,13 +1,15 @@
 
 import streamlit as st
 import pandas as pd
+import numpy as np
 import plotly.graph_objects as go
-import plotly.express as px
 from pathlib import Path
+from io import BytesIO
+import unicodedata
 
-# -------------------------------------------------------
-# CONFIG
-# -------------------------------------------------------
+# ============================================================
+# APP CONFIG
+# ============================================================
 st.set_page_config(
     page_title="Industrial Performance | H2M",
     page_icon="🏭",
@@ -15,862 +17,1131 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-NAVY = "#061D34"
-NAVY2 = "#0A2C4C"
-BLUE = "#0B5EA8"
-CYAN = "#00B8F0"
+NAVY = "#071C31"
+NAVY_2 = "#0A2E4E"
+BLUE = "#0B5FA5"
+CYAN = "#00B7E8"
 TEXT = "#10233F"
-MUTED = "#6D7B8F"
+MUTED = "#6E7C90"
 BG = "#F4F7FB"
-BORDER = "#E2E8F0"
-RED = "#E53935"
-ORANGE = "#F47B20"
-GREEN = "#13A86B"
-INFO = "#3578C6"
 WHITE = "#FFFFFF"
+BORDER = "#DFE6EF"
+RED = "#E53B36"
+ORANGE = "#F47B20"
+GREEN = "#12A66A"
+SOFT = "#EEF4F9"
 
-# -------------------------------------------------------
-# CSS
-# -------------------------------------------------------
 st.markdown(f"""
 <style>
 #MainMenu {{visibility:hidden;}}
 footer {{visibility:hidden;}}
-header[data-testid="stHeader"] {{background:transparent;}}
-
-.stApp {{
-    background:{BG};
-    color:{TEXT};
-}}
-
+header[data-testid="stHeader"] {{height:44px;background:transparent;}}
+[data-testid="stToolbar"] {{right:1.2rem;}}
+.stApp {{background:{BG};color:{TEXT};}}
 .block-container {{
-    max-width: 1720px;
-    padding-top: 0.8rem;
-    padding-bottom: 2rem;
+    max-width: 1620px;
+    padding: .4rem 1.55rem 2rem 1.55rem;
 }}
-
 [data-testid="stSidebar"] {{
-    background:linear-gradient(180deg,{NAVY} 0%,{NAVY2} 100%);
-    border-right:1px solid rgba(255,255,255,.07);
+    background:linear-gradient(180deg,{NAVY} 0%,{NAVY_2} 100%);
+    border-right:0;
+    width:290px !important;
 }}
-
-[data-testid="stSidebar"] .block-container {{
-    padding-top:1rem;
-}}
-
-[data-testid="stSidebar"] .stButton button {{
+[data-testid="stSidebar"] > div:first-child {{width:290px !important;}}
+[data-testid="stSidebar"] .block-container {{padding:1.05rem .9rem 1.2rem;}}
+[data-testid="stSidebar"] .stButton>button {{
     width:100%;
+    min-height:40px;
     justify-content:flex-start;
-    min-height:42px;
-    border:none;
+    padding:.45rem .7rem;
+    border:0;
     border-radius:9px;
     background:transparent;
-    color:#DCE8F4;
-    font-weight:650;
+    color:#D7E4EF;
     box-shadow:none;
+    font-size:.82rem;
+    font-weight:650;
 }}
-
-[data-testid="stSidebar"] .stButton button:hover {{
-    background:rgba(0,184,240,.10);
+[data-testid="stSidebar"] .stButton>button:hover {{
+    background:rgba(0,183,232,.10);
     color:white;
 }}
-
-[data-testid="stSidebar"] .stButton button[kind="primary"] {{
-    background:linear-gradient(90deg,#0B5EA8,#078FC9);
+[data-testid="stSidebar"] .stButton>button[kind="primary"] {{
+    background:linear-gradient(90deg,#0C66A8,#0798CB);
     color:white;
     border-left:3px solid {CYAN};
 }}
-
-.brand-sub {{
-    color:#ABC0D3;
-    font-size:.72rem;
-    margin-top:-6px;
-    margin-bottom:16px;
+.brand-tag {{
+    color:#AFC2D2;
+    font-size:.68rem;
+    margin:-2px 0 14px 2px;
 }}
-
-.sidebar-footer {{
-    margin-top:22px;
-    padding:14px 4px 0;
-    color:#C4D3DF;
-    font-size:.78rem;
+.sidebar-note {{
+    margin-top:18px;
+    padding:12px 4px 0 4px;
+    color:#C5D5E2;
+    font-size:.72rem;
     line-height:1.45;
 }}
-
-.sidebar-tag {{
-    color:#7BE1FF;
-    font-size:.61rem;
+.sidebar-note small {{
+    color:#77E1FF;
+    font-size:.58rem;
     letter-spacing:.08em;
-    margin-top:10px;
 }}
-
+.topbar {{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    margin:0 0 .55rem 0;
+}}
 .eyebrow {{
     color:{BLUE};
-    font-size:.66rem;
+    font-size:.62rem;
     font-weight:850;
-    letter-spacing:.08em;
+    letter-spacing:.09em;
     text-transform:uppercase;
 }}
-
 .page-title {{
-    font-size:2rem;
-    font-weight:850;
-    line-height:1.05;
-    letter-spacing:-.03em;
+    font-size:1.82rem;
+    line-height:1.04;
+    font-weight:860;
+    letter-spacing:-.035em;
     color:{TEXT};
-    margin-top:.15rem;
+    margin:.1rem 0 0 0;
 }}
-
 .page-subtitle {{
+    font-size:.83rem;
     color:{MUTED};
-    font-size:.92rem;
-    margin-top:.3rem;
-    margin-bottom:.9rem;
+    margin:.28rem 0 1rem 0;
 }}
-
-.top-quote {{
-    text-align:right;
-    color:{TEXT};
-    font-weight:750;
-    font-size:.88rem;
-    line-height:1.25;
-    padding-top:.4rem;
+.data-badge {{
+    display:inline-block;
+    border-radius:999px;
+    padding:4px 9px;
+    font-size:.62rem;
+    font-weight:800;
+    border:1px solid #D6E3ED;
+    background:#F9FBFD;
+    color:#476176;
 }}
-
 .kpi-card {{
+    height:106px;
+    box-sizing:border-box;
     background:{WHITE};
     border:1px solid {BORDER};
-    border-radius:14px;
-    padding:14px 14px 13px;
-    box-shadow:0 4px 14px rgba(10,35,60,.035);
-    min-height:112px;
+    border-radius:13px;
+    padding:13px 14px;
+    box-shadow:0 4px 16px rgba(10,35,60,.035);
+    overflow:hidden;
 }}
-
 .kpi-label {{
-    font-size:.69rem;
-    font-weight:750;
+    height:18px;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
     color:{MUTED};
+    font-size:.67rem;
+    font-weight:750;
+}}
+.kpi-value {{
+    color:{TEXT};
+    font-size:1.42rem;
+    line-height:1.08;
+    font-weight:860;
+    letter-spacing:-.035em;
+    margin:.36rem 0 .25rem;
+    white-space:nowrap;
+}}
+.kpi-delta {{
+    font-size:.69rem;
+    font-weight:820;
     white-space:nowrap;
     overflow:hidden;
     text-overflow:ellipsis;
 }}
-
-.kpi-value {{
-    font-size:1.52rem;
-    font-weight:850;
-    color:{TEXT};
-    letter-spacing:-.025em;
-    margin:.22rem 0 .18rem;
-}}
-
-.kpi-delta {{
-    font-size:.74rem;
-    font-weight:850;
-}}
-
-.status-dot {{
+.dot {{
     display:inline-block;
-    width:8px;
-    height:8px;
-    border-radius:50%;
+    width:7px;
+    height:7px;
     margin-right:5px;
+    border-radius:50%;
 }}
-
 .panel {{
+    box-sizing:border-box;
     background:{WHITE};
     border:1px solid {BORDER};
-    border-radius:14px;
-    padding:15px 16px;
-    box-shadow:0 4px 14px rgba(10,35,60,.035);
+    border-radius:13px;
+    padding:14px 15px;
+    box-shadow:0 4px 16px rgba(10,35,60,.035);
 }}
-
+.panel.h360 {{height:360px;overflow:hidden;}}
+.panel.h315 {{height:315px;overflow:hidden;}}
+.panel.h240 {{height:240px;overflow:hidden;}}
 .panel-title {{
-    font-size:.98rem;
+    font-size:.92rem;
     font-weight:850;
     color:{TEXT};
-    margin-bottom:4px;
+    margin-bottom:2px;
 }}
-
 .panel-sub {{
-    font-size:.68rem;
+    font-size:.63rem;
     color:{MUTED};
     margin-bottom:8px;
 }}
-
-.table-wrap table {{
+.kpi-table {{
     width:100%;
+    table-layout:fixed;
     border-collapse:collapse;
-    font-size:.76rem;
+    font-size:.69rem;
 }}
-
-.table-wrap th {{
-    text-align:left;
+.kpi-table th {{
     color:{MUTED};
+    font-size:.57rem;
+    letter-spacing:.045em;
     text-transform:uppercase;
-    letter-spacing:.03em;
-    font-size:.64rem;
-    padding:7px 4px;
+    text-align:left;
+    padding:6px 4px;
     border-bottom:1px solid {BORDER};
 }}
-
-.table-wrap td {{
-    padding:8px 4px;
+.kpi-table td {{
+    color:{TEXT};
+    padding:7px 4px;
+    border-bottom:1px solid #EFF3F7;
+    vertical-align:middle;
+    overflow:hidden;
+    text-overflow:ellipsis;
+}}
+.kpi-table td:first-child {{font-weight:780;}}
+.alert {{
+    display:grid;
+    grid-template-columns:22px 1fr;
+    gap:8px;
+    padding:7px 0;
     border-bottom:1px solid #EEF2F6;
 }}
-
-.alert-row {{
-    display:flex;
-    gap:9px;
-    padding:9px 0;
-    border-bottom:1px solid #EEF2F6;
-}}
-
 .alert-icon {{
-    min-width:24px;
-    height:24px;
-    border-radius:50%;
+    width:22px;
+    height:22px;
     display:flex;
     align-items:center;
     justify-content:center;
+    border-radius:50%;
     color:white;
-    font-size:.72rem;
-    font-weight:850;
-}}
-
-.alert-title {{
-    font-size:.76rem;
-    font-weight:800;
-    color:{TEXT};
-    line-height:1.2;
-}}
-
-.alert-sub {{
-    font-size:.66rem;
-    color:{MUTED};
-    margin-top:2px;
-    line-height:1.25;
-}}
-
-.agent-box {{
-    background:linear-gradient(135deg,#E9F6FF,#F7FCFF);
-    border:1px solid #CDE8FA;
-    border-radius:14px;
-    padding:15px 16px;
-}}
-
-.agent-dark {{
-    background:linear-gradient(135deg,#071E36,#0A2D4F);
-    border-radius:14px;
-    padding:15px 16px;
-    color:white;
-}}
-
-.status-pill {{
-    display:inline-block;
-    padding:3px 8px;
-    border-radius:999px;
     font-size:.65rem;
     font-weight:850;
 }}
-
+.alert-title {{
+    color:{TEXT};
+    font-size:.68rem;
+    font-weight:820;
+    line-height:1.2;
+}}
+.alert-sub {{
+    color:{MUTED};
+    font-size:.59rem;
+    line-height:1.22;
+    margin-top:2px;
+}}
+.agent-strip {{
+    display:grid;
+    grid-template-columns:1.4fr .9fr;
+    gap:14px;
+    background:linear-gradient(135deg,#EAF6FE 0%,#F8FCFF 100%);
+    border:1px solid #CDE6F8;
+    border-radius:13px;
+    padding:14px 16px;
+}}
+.agent-title {{font-size:.82rem;font-weight:850;color:{TEXT};}}
+.agent-copy {{font-size:.69rem;line-height:1.45;color:#34465C;margin-top:4px;}}
+.priority {{
+    display:inline-block;
+    padding:3px 7px;
+    border-radius:999px;
+    font-size:.58rem;
+    font-weight:850;
+}}
+.small {{font-size:.62rem;color:{MUTED};}}
+.stSelectbox [data-baseweb="select"] > div {{
+    min-height:38px;
+    border-radius:9px;
+    background:#F9FBFD;
+}}
+.stButton>button, .stDownloadButton>button, .stFormSubmitButton>button {{
+    border-radius:9px;
+    min-height:38px;
+    font-weight:760;
+}}
 div[data-testid="stMetric"] {{
     background:white;
     border:1px solid {BORDER};
-    border-radius:14px;
-    padding:12px 14px;
+    border-radius:13px;
+    padding:11px 13px;
 }}
-
-.stButton>button {{
-    border-radius:9px;
-    font-weight:750;
+div[data-testid="stDataFrame"] {{
+    border:1px solid {BORDER};
+    border-radius:11px;
+    overflow:hidden;
 }}
-
-.stDownloadButton>button {{
-    border-radius:9px;
-    font-weight:750;
-}}
-
 @media (max-width:1200px) {{
-    .page-title {{font-size:1.7rem;}}
-    .kpi-value {{font-size:1.25rem;}}
-    .kpi-card {{min-height:104px;}}
+    .block-container {{padding-left:1rem;padding-right:1rem;}}
+    .kpi-value {{font-size:1.18rem;}}
+    .kpi-card {{padding:11px;height:98px;}}
 }}
 </style>
 """, unsafe_allow_html=True)
 
-# -------------------------------------------------------
-# DATA
-# -------------------------------------------------------
-perf = pd.DataFrame({
-    "Mês":["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago"],
-    "Produção":[39200,40100,41800,40400,40900,40700,42100,41250],
-    "Meta Produção":[45000,45500,46000,46500,47000,47000,47500,48000],
-    "OEE":[0.64,0.68,0.73,0.66,0.67,0.66,0.70,0.714],
-    "Margem":[0.312,0.307,0.301,0.294,0.288,0.284,0.281,0.278],
-})
+# ============================================================
+# UTILITIES / DATA ENGINE
+# ============================================================
+def norm(x):
+    x = str(x).strip().lower()
+    x = ''.join(c for c in unicodedata.normalize("NFKD", x) if not unicodedata.combining(c))
+    return ''.join(ch if ch.isalnum() else '_' for ch in x).strip('_')
 
-kpis = [
-    ("Produção","41.250 un","45.000",-0.083,"-8,3%","↓"),
-    ("OEE","71,4%","78%",-0.0846,"-6,6 pp","↓"),
-    ("Produtividade","18,2 un/h","19,5",-0.067,"-6,7%","→"),
-    ("Refugo","3,8%","2,5%",-0.52,"+1,3 pp","↑"),
-    ("OTIF","89%","95%",-0.063,"-6 pp","↓"),
-    ("Custo/unidade","R$ 18,42","R$ 17,10",-0.077,"+7,7%","↑"),
-    ("Horas extras","1.280 h","900 h",-0.422,"+42%","↑"),
-    ("Margem contribuição","27,8%","31%",-0.103,"-3,2 pp","↓"),
-]
+def nseries(s):
+    return pd.to_numeric(s, errors="coerce").fillna(0)
 
-cards = [
-    ("Receita Líquida","R$ 12,4 mi",-0.068,"-6,8% vs. meta"),
-    ("Margem de Contribuição","27,8%",-0.103,"-3,2 pp vs. meta"),
-    ("EBITDA Industrial","R$ 1,9 mi",-0.208,"-20,8% vs. meta"),
-    ("Produção","41.250 un",-0.083,"-8,3% vs. meta"),
-    ("OEE","71,4%",-0.0846,"-6,6 pp vs. meta"),
-    ("Custo por Unidade","R$ 18,42",-0.077,"+7,7% vs. meta"),
-]
+def safe_div(a,b):
+    return float(a/b) if b not in (0,0.0) and pd.notna(b) else 0.0
 
-dre_impacts = pd.DataFrame({
-    "Impacto":["Menor volume produzido","Aumento de refugo","Horas extras","Manutenção corretiva","Maior consumo de MP"],
-    "R$ mil":[220,110,95,75,48]
-})
+def fmt_pct(x):
+    return f"{x:.1%}".replace(".",",")
 
-levers = pd.DataFrame({
-    "Alavanca":["Disponibilidade Linha 3","Redução de refugo","Otimização de setup","Redução de horas extras","Consumo específico de MP"],
-    "Gap Atual":["-12,4%","+1,3 pp","+18 h","+42%","+4%"],
-    "Impacto Potencial":["R$ 312 mil","R$ 214 mil","R$ 96 mil","R$ 88 mil","R$ 72 mil"],
-    "Prioridade":["Alta","Alta","Média","Média","Baixa"]
-})
+def fmt_money(x, decimals=1):
+    if abs(x) >= 1_000_000:
+        return f"R$ {x/1_000_000:.{decimals}f} mi".replace(".",",")
+    if abs(x) >= 1_000:
+        return f"R$ {x/1_000:.{decimals}f} mil".replace(".",",")
+    return f"R$ {x:,.0f}".replace(",", ".")
 
-alerts = [
-    ("Crítico","OEE da Linha 3 18% abaixo da meta","Impacto estimado: R$ 312 mil na margem"),
-    ("Crítico","Refugo 1,3 pp acima da meta","Impacto estimado: R$ 214 mil"),
-    ("Atenção","Horas extras 42% acima da meta","Impacto estimado: R$ 95 mil"),
-    ("Atenção","Custo por unidade 7,7% acima da meta","Revisar consumo de matéria-prima"),
-    ("Info","OTIF abaixo de 90% pelo segundo mês","Risco de perda de pedidos e receita"),
-]
-
-line_perf = pd.DataFrame({
-    "Linha":["Linha 1","Linha 2","Linha 3","Linha 4"],
-    "OEE":[0.81,0.76,0.64,0.74],
-    "Disponibilidade":[0.86,0.82,0.69,0.80],
-    "Performance":[0.96,0.94,0.95,0.93],
-    "Qualidade":[0.98,0.985,0.975,0.99],
-    "Refugo":[0.022,0.026,0.041,0.019],
-    "Gap Produção":[-1200,-2100,-7200,-1800],
-    "Paradas h":[18,31,79,25]
-})
-
-causes = pd.DataFrame({
-    "Causa":["Falha mecânica","Setup","Falha elétrica","Falta de material","Microparadas","Qualidade"],
-    "Horas":[58,41,29,22,18,12],
-    "Impacto R$ mil":[164,96,82,61,45,39]
-})
-
-dre = pd.DataFrame({
-    "Linha":["Receita Líquida","(-) Custos Variáveis","Margem de Contribuição","(-) Custos Fixos","EBITDA Industrial"],
-    "Realizado":[12.40,-8.95,3.45,-1.55,1.90],
-    "Meta":[13.30,-9.18,4.12,-1.72,2.40]
-})
-
-costs = pd.DataFrame({
-    "Categoria":["Matéria-prima","Mão de obra direta","Energia variável","Fretes","Manutenção","Estrutura fabril","Supervisão","Depreciação"],
-    "Tipo":["Variável","Variável","Variável","Variável","Fixo","Fixo","Fixo","Fixo"],
-    "Realizado R$ mil":[5200,1680,730,620,510,430,370,240],
-    "Orçamento R$ mil":[4950,1550,680,590,440,410,340,230]
-})
-
-actions_df = pd.DataFrame({
-    "Prioridade":["Alta","Alta","Média","Média"],
-    "Problema":["Disponibilidade Linha 3","Refugo Produto A","Horas extras","Setup Linha 2"],
-    "Ação":["Plano de confiabilidade MX-04","Revisar parâmetros de processo","Redimensionar turnos","SMED em família B"],
-    "Responsável":["Ger. Manutenção","Ger. Qualidade","Ger. Produção","Eng. Processos"],
-    "Prazo":["10/09/2026","12/09/2026","15/09/2026","18/09/2026"],
-    "Impacto":["R$ 312 mil","R$ 214 mil","R$ 88 mil","R$ 96 mil"],
-    "Status":["Em andamento","Não iniciado","Em andamento","Planejado"]
-})
-
-# -------------------------------------------------------
-# HELPERS
-# -------------------------------------------------------
-def status_color(delta):
-    if delta < -0.10:
+def score_color(score):
+    if score < -0.10:
         return RED
-    if delta < 0:
+    if score < 0:
         return ORANGE
     return GREEN
 
-def navigate(page):
-    st.session_state["page"] = page
+SHEETS = {
+    "producao":["producao","produção","production"],
+    "qualidade":["qualidade","quality"],
+    "manutencao":["manutencao","manutenção","maintenance"],
+    "pessoas":["pessoas","people","mao_de_obra","mão de obra"],
+    "custos":["custos","costs","financeiro"],
+    "metas":["metas","targets","goals"]
+}
+
+ALIASES = {
+    "producao":{
+        "data":["data","date"],"fabrica":["fabrica","planta","site","factory"],
+        "linha":["linha","line"],"produto":["produto","sku","product"],
+        "planejado":["planejado","plano","meta_producao","planned"],
+        "realizado":["realizado","producao_real","qtd_produzida","volume","actual"],
+        "horas_disponiveis":["horas_disponiveis","horas_planejadas","available_hours"],
+        "horas_paradas":["horas_paradas","paradas_horas","downtime_hours"],
+        "velocidade_real":["velocidade_real","performance_real","actual_speed"],
+        "velocidade_nominal":["velocidade_nominal","velocidade_padrao","nominal_speed"]
+    },
+    "qualidade":{
+        "data":["data","date"],"linha":["linha","line"],"produto":["produto","sku","product"],
+        "produzido":["produzido","producao","produced"],"aprovado":["aprovado","bons","good_units"],
+        "refugo":["refugo","scrap"],"retrabalho":["retrabalho","rework"]
+    },
+    "manutencao":{
+        "data":["data","date"],"linha":["linha","line"],"maquina":["maquina","equipamento","machine"],
+        "tipo_parada":["tipo_parada","tipo","downtime_type"],"duracao_horas":["duracao_horas","horas","duracao","duration_hours"],
+        "causa":["causa","motivo","cause"]
+    },
+    "pessoas":{
+        "data":["data","date"],"linha":["linha","line"],"turno":["turno","shift"],
+        "operadores":["operadores","headcount","pessoas"],"horas_normais":["horas_normais","regular_hours"],
+        "horas_extras":["horas_extras","overtime","overtime_hours"]
+    },
+    "custos":{
+        "data":["data","date"],"linha":["linha","line"],"produto":["produto","sku","product"],
+        "custo_mp":["custo_mp","materia_prima","raw_material_cost"],
+        "custo_mod":["custo_mod","mao_de_obra_direta","direct_labor_cost"],
+        "custo_energia":["custo_energia","energia","energy_cost"],
+        "custo_manutencao":["custo_manutencao","manutencao","maintenance_cost"],
+        "custo_fixo":["custo_fixo","fixed_cost","custos_fixos"],
+        "receita":["receita","faturamento","revenue"]
+    },
+    "metas":{"indicador":["indicador","kpi","metric"],"meta":["meta","target","goal"]}
+}
+
+def canonical_sheet(name):
+    n = norm(name)
+    for canon, aliases in SHEETS.items():
+        if n in [norm(a) for a in aliases]:
+            return canon
+    return None
+
+def rename_cols(df, sheet):
+    amap={}
+    for canon, aliases in ALIASES[sheet].items():
+        for a in aliases + [canon]:
+            amap[norm(a)] = canon
+    return df.rename(columns={c:amap[norm(c)] for c in df.columns if norm(c) in amap})
+
+def parse_excel(raw):
+    xls = pd.ExcelFile(BytesIO(raw))
+    data={}
+    for sh in xls.sheet_names:
+        canon=canonical_sheet(sh)
+        if canon:
+            df=pd.read_excel(BytesIO(raw),sheet_name=sh)
+            data[canon]=rename_cols(df,canon)
+    required={
+        "producao":["data","linha","planejado","realizado","horas_disponiveis","horas_paradas","velocidade_real","velocidade_nominal"],
+        "qualidade":["data","linha","produzido","aprovado","refugo"],
+        "manutencao":["data","linha","maquina","duracao_horas","causa"],
+        "pessoas":["data","linha","horas_normais","horas_extras"],
+        "custos":["data","linha","custo_mp","custo_mod","custo_energia","custo_manutencao","receita"],
+    }
+    issues=[]
+    for sh, cols in required.items():
+        if sh not in data:
+            issues.append(f"Aba ausente: {sh.title()}")
+        else:
+            miss=[c for c in cols if c not in data[sh].columns]
+            if miss:
+                issues.append(f"{sh.title()}: faltam {', '.join(miss)}")
+    if issues:
+        return None, issues
+    for k,df in data.items():
+        if "data" in df.columns:
+            df["data"]=pd.to_datetime(df["data"],errors="coerce")
+    return data, []
+
+def target_from(data, names, default):
+    m=data.get("metas")
+    if m is None or m.empty or "indicador" not in m or "meta" not in m:
+        return default
+    mm=m.copy()
+    mm["_i"]=mm["indicador"].map(norm)
+    hit=mm[mm["_i"].isin([norm(x) for x in names])]
+    if hit.empty:
+        return default
+    v=pd.to_numeric(hit.iloc[0]["meta"],errors="coerce")
+    return float(v) if pd.notna(v) else default
+
+def calculate_real(data):
+    p=data["producao"].copy()
+    q=data["qualidade"].copy()
+    m=data["manutencao"].copy()
+    pe=data["pessoas"].copy()
+    c=data["custos"].copy()
+
+    for col in ["planejado","realizado","horas_disponiveis","horas_paradas","velocidade_real","velocidade_nominal"]:
+        p[col]=nseries(p[col])
+    for col in ["produzido","aprovado","refugo"]:
+        q[col]=nseries(q[col])
+    for col in ["duracao_horas"]:
+        m[col]=nseries(m[col])
+    for col in ["horas_normais","horas_extras"]:
+        pe[col]=nseries(pe[col])
+    for col in ["custo_mp","custo_mod","custo_energia","custo_manutencao","receita"]:
+        c[col]=nseries(c[col])
+    if "custo_fixo" in c.columns:
+        c["custo_fixo"]=nseries(c["custo_fixo"])
+    else:
+        c["custo_fixo"]=0
+
+    planned=p["planejado"].sum()
+    actual=p["realizado"].sum()
+    attainment=safe_div(actual,planned)
+
+    availability=max(0,min(1,1-safe_div(p["horas_paradas"].sum(),p["horas_disponiveis"].sum())))
+    pr=(p["velocidade_real"]/p["velocidade_nominal"].replace(0,np.nan)).replace([np.inf,-np.inf],np.nan)
+    performance=float(pr.mean()) if pr.notna().any() else 0
+    performance=max(0,min(1.2,performance))
+    quality=max(0,min(1,safe_div(q["aprovado"].sum(),q["produzido"].sum())))
+    oee=availability*min(performance,1)*quality
+    scrap=safe_div(q["refugo"].sum(),q["produzido"].sum())
+
+    var_cost=c[["custo_mp","custo_mod","custo_energia","custo_manutencao"]].sum().sum()
+    fixed_cost=c["custo_fixo"].sum()
+    revenue=c["receita"].sum()
+    total_cost=var_cost+fixed_cost
+    contrib=revenue-var_cost
+    ebitda=revenue-total_cost
+    margin_contrib=safe_div(contrib,revenue)
+    cost_unit=safe_div(total_cost,actual)
+
+    overtime=pe["horas_extras"].sum()
+    hours=pe["horas_normais"].sum()+overtime
+    productivity=safe_div(actual,hours)
+
+    t_oee=target_from(data,["OEE"],0.78)
+    t_scrap=target_from(data,["Refugo","Taxa Refugo"],0.025)
+    t_prod=target_from(data,["Atingimento Produção","Produção"],1.0)
+    t_margin=target_from(data,["Margem","Margem Contribuição"],0.31)
+
+    # Daily trend
+    trend=p.groupby("data",as_index=False)[["planejado","realizado"]].sum().dropna().sort_values("data")
+    if len(trend)>35:
+        trend=trend.tail(35)
+
+    # Line performance
+    rows=[]
+    for line in sorted(p["linha"].astype(str).unique()):
+        pp=p[p["linha"].astype(str)==line]
+        qq=q[q["linha"].astype(str)==line]
+        mm=m[m["linha"].astype(str)==line]
+        av=max(0,min(1,1-safe_div(pp["horas_paradas"].sum(),pp["horas_disponiveis"].sum())))
+        rr=(pp["velocidade_real"]/pp["velocidade_nominal"].replace(0,np.nan)).replace([np.inf,-np.inf],np.nan)
+        pf=float(rr.mean()) if rr.notna().any() else 0
+        qu=max(0,min(1,safe_div(qq["aprovado"].sum(),qq["produzido"].sum())))
+        oo=av*min(pf,1)*qu
+        rows.append({
+            "Linha":line,"OEE":oo,"Disponibilidade":av,"Performance":pf,"Qualidade":qu,
+            "Refugo":safe_div(qq["refugo"].sum(),qq["produzido"].sum()),
+            "Gap Produção":pp["realizado"].sum()-pp["planejado"].sum(),
+            "Paradas h":mm["duracao_horas"].sum()
+        })
+    line_perf=pd.DataFrame(rows)
+
+    # causes
+    causes=m.groupby("causa",as_index=False)["duracao_horas"].sum().rename(columns={"duracao_horas":"Horas"})
+    if not causes.empty:
+        margin_unit=safe_div(contrib,actual)
+        units_h=safe_div(actual,max(1,hours))
+        causes["Impacto R$ mil"]=causes["Horas"]*units_h*margin_unit/1000
+        causes=causes.sort_values("Horas",ascending=False).head(6)
+
+    # KPIs with status score direction-aware
+    kpis=[
+        ("Produção",f"{actual:,.0f} un".replace(",","."),f"{planned:,.0f}".replace(",","."),attainment-1,f"{attainment-1:+.1%}".replace(".",","),"↑" if attainment>=1 else "↓"),
+        ("OEE",fmt_pct(oee),fmt_pct(t_oee),safe_div(oee,t_oee)-1,f"{(oee-t_oee)*100:+.1f} pp".replace(".",","),"↑" if oee>=t_oee else "↓"),
+        ("Produtividade",f"{productivity:.1f} un/h".replace(".",","),"—",0,"—","→"),
+        ("Refugo",fmt_pct(scrap),fmt_pct(t_scrap),1-safe_div(scrap,t_scrap),f"{(scrap-t_scrap)*100:+.1f} pp".replace(".",","),"↓" if scrap<=t_scrap else "↑"),
+        ("OTIF","—","—",0,"—","→"),
+        ("Custo/unidade",fmt_money(cost_unit,2),"—",0,"—","→"),
+        ("Horas extras",f"{overtime:,.0f} h".replace(",","."),"—",0,"—","→"),
+        ("Margem contribuição",fmt_pct(margin_contrib),fmt_pct(t_margin),safe_div(margin_contrib,t_margin)-1,f"{(margin_contrib-t_margin)*100:+.1f} pp".replace(".",","),"↑" if margin_contrib>=t_margin else "↓"),
+    ]
+
+    margin_score=safe_div(margin_contrib,t_margin)-1
+    cards=[
+        ("Receita Líquida",fmt_money(revenue),attainment-1,f"{attainment-1:+.1%} vs. plano".replace(".",",")),
+        ("Margem Contrib.",fmt_pct(margin_contrib),margin_score,f"{(margin_contrib-t_margin)*100:+.1f} pp vs. meta".replace(".",",")),
+        ("EBITDA Industrial",fmt_money(ebitda),margin_score,f"{margin_score:+.1%} vs. referência".replace(".",",")),
+        ("Produção",f"{actual:,.0f} un".replace(",","."),attainment-1,f"{attainment-1:+.1%} vs. meta".replace(".",",")),
+        ("OEE",fmt_pct(oee),safe_div(oee,t_oee)-1,f"{(oee-t_oee)*100:+.1f} pp vs. meta".replace(".",",")),
+        ("Custo / un.",fmt_money(cost_unit,2),0,"calculado no período"),
+    ]
+
+    loss_prod=max(0,planned-actual)*safe_div(contrib,max(1,actual))
+    loss_scrap=q["refugo"].sum()*safe_div(total_cost,max(1,actual))
+    loss_down=m["duracao_horas"].sum()*safe_div(actual,max(1,hours))*safe_div(contrib,max(1,actual))
+    impacts=pd.DataFrame({
+        "Impacto":["Gap de produção","Refugo","Paradas","Horas extras","Consumo / mix"],
+        "R$":[loss_prod,loss_scrap,loss_down,overtime*30,max(0,total_cost*0.015)]
+    }).sort_values("R$",ascending=False)
+
+    # Finance snapshot
+    dre=pd.DataFrame({
+        "Linha":["Receita Líquida","(-) Custos Variáveis","Margem de Contribuição","(-) Custos Fixos","EBITDA Industrial"],
+        "Realizado":[revenue,-var_cost,contrib,-fixed_cost,ebitda]
+    })
+
+    return {
+        "cards":cards,"kpis":kpis,"trend":trend,"line_perf":line_perf,"causes":causes,
+        "impacts":impacts,"dre":dre,"cost_structure":{"Variável":var_cost,"Fixo":fixed_cost},
+        "oee":oee,"target_oee":t_oee,"scrap":scrap,"target_scrap":t_scrap,
+        "attainment":attainment,"margin":margin_contrib,"target_margin":t_margin,
+        "ebitda":ebitda,"revenue":revenue,"actual":actual,"planned":planned
+    }
+
+def demo_dataset():
+    months=["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago"]
+    trend=pd.DataFrame({
+        "data":pd.date_range("2026-08-01",periods=31,freq="D"),
+        "planejado":[1450+((i%7)*12) for i in range(31)],
+        "realizado":[1320+((i%7)*17)+(40 if i>20 else 0) for i in range(31)]
+    })
+    line_perf=pd.DataFrame({
+        "Linha":["Linha 1","Linha 2","Linha 3","Linha 4"],
+        "OEE":[.81,.76,.64,.74],"Disponibilidade":[.86,.82,.69,.80],
+        "Performance":[.96,.94,.95,.93],"Qualidade":[.98,.985,.975,.99],
+        "Refugo":[.022,.026,.041,.019],"Gap Produção":[-1200,-2100,-7200,-1800],
+        "Paradas h":[18,31,79,25]
+    })
+    causes=pd.DataFrame({
+        "Causa":["Falha mecânica","Setup","Falha elétrica","Falta de material","Microparadas","Qualidade"],
+        "Horas":[58,41,29,22,18,12],
+        "Impacto R$ mil":[164,96,82,61,45,39]
+    })
+    cards=[
+        ("Receita Líquida","R$ 12,4 mi",-0.068,"-6,8% vs. meta"),
+        ("Margem Contrib.","27,8%",-0.103,"-3,2 pp vs. meta"),
+        ("EBITDA Industrial","R$ 1,9 mi",-0.208,"-20,8% vs. meta"),
+        ("Produção","41.250 un",-0.083,"-8,3% vs. meta"),
+        ("OEE","71,4%",-0.0846,"-6,6 pp vs. meta"),
+        ("Custo / un.","R$ 18,42",-0.077,"+7,7% vs. meta"),
+    ]
+    kpis=[
+        ("Produção","41.250 un","45.000",-0.083,"-8,3%","↓"),
+        ("OEE","71,4%","78%",-0.0846,"-6,6 pp","↓"),
+        ("Produtividade","18,2 un/h","19,5",-0.067,"-6,7%","→"),
+        ("Refugo","3,8%","2,5%",-0.52,"+1,3 pp","↑"),
+        ("OTIF","89%","95%",-0.063,"-6 pp","↓"),
+        ("Custo/unidade","R$ 18,42","R$ 17,10",-0.077,"+7,7%","↑"),
+        ("Horas extras","1.280 h","900 h",-0.422,"+42%","↑"),
+        ("Margem contribuição","27,8%","31%",-0.103,"-3,2 pp","↓"),
+    ]
+    impacts=pd.DataFrame({"Impacto":["Menor volume","Refugo","Horas extras","Manutenção","Consumo MP"],"R$":[220000,110000,95000,75000,48000]})
+    dre=pd.DataFrame({
+        "Linha":["Receita Líquida","(-) Custos Variáveis","Margem de Contribuição","(-) Custos Fixos","EBITDA Industrial"],
+        "Realizado":[12400000,-8950000,3450000,-1550000,1900000]
+    })
+    return {
+        "cards":cards,"kpis":kpis,"trend":trend,"line_perf":line_perf,"causes":causes,"impacts":impacts,
+        "dre":dre,"cost_structure":{"Variável":8950000,"Fixo":1550000},
+        "oee":.714,"target_oee":.78,"scrap":.038,"target_scrap":.025,
+        "attainment":.917,"margin":.278,"target_margin":.31,
+        "ebitda":1900000,"revenue":12400000,"actual":41250,"planned":45000
+    }
+
+# ============================================================
+# SESSION STATE
+# ============================================================
+if "page" not in st.session_state:
+    st.session_state.page="Cockpit Executivo"
+if "real_data" not in st.session_state:
+    st.session_state.real_data=None
+if "actions" not in st.session_state:
+    st.session_state.actions=pd.DataFrame([
+        ["Alta","Disponibilidade Linha 3","Plano de confiabilidade MX-04","Ger. Manutenção","10/09/2026","R$ 312 mil","Em andamento"],
+        ["Alta","Refugo Produto A","Revisar parâmetros de processo","Ger. Qualidade","12/09/2026","R$ 214 mil","Não iniciado"],
+        ["Média","Horas extras","Redimensionar turnos","Ger. Produção","15/09/2026","R$ 88 mil","Em andamento"],
+    ],columns=["Prioridade","Problema","Ação","Responsável","Prazo","Impacto","Status"])
+
+D = calculate_real(st.session_state.real_data) if st.session_state.real_data else demo_dataset()
+
+# ============================================================
+# UI HELPERS
+# ============================================================
+def nav(page):
+    st.session_state.page=page
     st.rerun()
 
-def header(title, subtitle):
-    c1,c2,c3,c4 = st.columns([1.15,1.15,.85,2.2], gap="small")
-    with c1:
-        st.selectbox("Grupo",["Grupo Industrial S.A."],label_visibility="collapsed",key=f"g_{title}")
-    with c2:
-        st.selectbox("Planta",["Planta São Paulo","Todas as plantas"],label_visibility="collapsed",key=f"p_{title}")
-    with c3:
-        st.selectbox("Período",["Ago/2026","Jul/2026","Jun/2026"],label_visibility="collapsed",key=f"d_{title}")
-    with c4:
-        st.markdown('<div class="top-quote">“Transformar dados em decisões<br>que geram mais margem.”</div>',unsafe_allow_html=True)
+def page_header(title,subtitle):
+    c1,c2,c3,c4=st.columns([1.15,1.15,.85,1.3],gap="small")
+    c1.selectbox("Grupo",["Grupo Industrial S.A."],label_visibility="collapsed",key=f"g_{title}")
+    c2.selectbox("Planta",["Planta São Paulo","Todas as plantas"],label_visibility="collapsed",key=f"p_{title}")
+    c3.selectbox("Período",["Ago/2026","Jul/2026","Jun/2026"],label_visibility="collapsed",key=f"d_{title}")
+    mode="Dados importados" if st.session_state.real_data else "Dados demo"
+    c4.markdown(f'<div style="text-align:right;padding-top:.3rem"><span class="data-badge">{mode}</span></div>',unsafe_allow_html=True)
     st.markdown('<div class="eyebrow">EXECUÇÃO HOJE. COMPETITIVIDADE AMANHÃ.</div>',unsafe_allow_html=True)
     st.markdown(f'<div class="page-title">{title}</div>',unsafe_allow_html=True)
     st.markdown(f'<div class="page-subtitle">{subtitle}</div>',unsafe_allow_html=True)
 
-def kpi_card(label,value,delta,delta_txt):
-    c=status_color(delta)
+def kpi_card(label,value,score,delta):
+    c=score_color(score)
     return f"""
     <div class="kpi-card">
-      <div class="kpi-label">{label}</div>
-      <div class="kpi-value">{value}</div>
-      <div class="kpi-delta" style="color:{c}">
-        <span class="status-dot" style="background:{c}"></span>{delta_txt}
-      </div>
-    </div>
-    """
+        <div class="kpi-label">{label}</div>
+        <div class="kpi-value">{value}</div>
+        <div class="kpi-delta" style="color:{c}">
+            <span class="dot" style="background:{c}"></span>{delta}
+        </div>
+    </div>"""
 
-def kpi_table_html():
+def table_kpis():
     rows=[]
-    for indicador,mes,meta,delta,desvio_txt,tend in kpis:
-        c=status_color(delta)
-        rows.append(
-            f"<tr><td><b>{indicador}</b></td><td>{mes}</td><td>{meta}</td>"
-            f"<td style='color:{c};font-weight:850'>{desvio_txt}</td>"
-            f"<td style='color:{c};font-weight:850'>{tend}</td></tr>"
-        )
+    for ind,mes,meta,score,delta,tend in D["kpis"]:
+        c=score_color(score)
+        rows.append(f"<tr><td>{ind}</td><td>{mes}</td><td>{meta}</td>"
+                    f"<td style='color:{c};font-weight:850'>{delta}</td>"
+                    f"<td style='color:{c};font-weight:850'>{tend}</td></tr>")
     return f"""
-    <div class="panel table-wrap">
+    <div class="panel h360">
       <div class="panel-title">Principais Indicadores</div>
-      <table>
+      <div class="panel-sub">Realizado, meta, desvio e tendência</div>
+      <table class="kpi-table">
+        <colgroup><col style="width:34%"><col style="width:19%"><col style="width:17%"><col style="width:20%"><col style="width:10%"></colgroup>
         <thead><tr><th>Indicador</th><th>Mês</th><th>Meta</th><th>Desvio</th><th>Tend.</th></tr></thead>
         <tbody>{''.join(rows)}</tbody>
       </table>
-    </div>
-    """
+    </div>"""
 
-def alert_html(level,title,subtitle):
-    if level=="Crítico":
-        c=RED;symbol="!"
-    elif level=="Atenção":
-        c=ORANGE;symbol="!"
-    else:
-        c=INFO;symbol="i"
-    return f"""
-    <div class="alert-row">
-      <div class="alert-icon" style="background:{c}">{symbol}</div>
-      <div>
-        <div class="alert-title">{title}</div>
-        <div class="alert-sub">{subtitle}</div>
-      </div>
-    </div>
-    """
+def panel_title(title,sub=None):
+    st.markdown(f'<div class="panel-title">{title}</div>' + (f'<div class="panel-sub">{sub}</div>' if sub else ''), unsafe_allow_html=True)
 
-def priority_badge(priority):
-    if priority=="Alta":
-        return f"<span class='status-pill' style='background:#FFF0EF;color:{RED};border:1px solid #FFC9C6'>Alta</span>"
-    if priority=="Média":
-        return f"<span class='status-pill' style='background:#FFF5E8;color:{ORANGE};border:1px solid #FFD7AE'>Média</span>"
-    return f"<span class='status-pill' style='background:#EAF8F1;color:{GREEN};border:1px solid #C4EAD7'>Baixa</span>"
-
-# -------------------------------------------------------
-# SIDEBAR NAVIGATION
-# -------------------------------------------------------
-if "page" not in st.session_state:
-    st.session_state["page"]="Cockpit Executivo"
-
-pages = [
-    "Cockpit Executivo",
-    "Performance Operacional",
-    "Diagnóstico e Causas",
-    "Finanças / DRE",
-    "Alavancas de Valor",
-    "Plano de Ação",
-    "Agente de Performance",
-    "Relatórios",
-    "Configurações"
-]
+# ============================================================
+# SIDEBAR
+# ============================================================
+pages=["Cockpit Executivo","Performance Operacional","Diagnóstico e Causas","Finanças / DRE",
+       "Alavancas de Valor","Plano de Ação","Agente de Performance","Relatórios","Configurações"]
 
 with st.sidebar:
-    logo = Path(__file__).parent/"logo_h2m_white.jpeg"
+    logo=Path(__file__).parent/"logo_h2m_white.jpeg"
     if logo.exists():
-        st.image(str(logo),width=145)
-    st.markdown('<div class="brand-sub">Da operação ao resultado.</div>',unsafe_allow_html=True)
-
+        st.image(str(logo),width=138)
+    st.markdown('<div class="brand-tag">Da operação ao resultado.</div>',unsafe_allow_html=True)
     for p in pages:
-        active = st.session_state["page"] == p
-        if st.button(p, key=f"nav_{p}", type="primary" if active else "secondary", use_container_width=True):
-            navigate(p)
-
+        if st.button(p,key=f"nav_{p}",type="primary" if st.session_state.page==p else "secondary",use_container_width=True):
+            nav(p)
     st.markdown("""
-    <div class="sidebar-footer">
-      <b>Indústrias mais eficientes.<br>Resultados mais fortes.</b>
-      <div class="sidebar-tag">PESSOAS &nbsp;&nbsp; DADOS &nbsp;&nbsp; AÇÃO</div>
+    <div class="sidebar-note">
+      <b>Indústrias mais eficientes.<br>Resultados mais fortes.</b><br>
+      <small>PESSOAS &nbsp;&nbsp; DADOS &nbsp;&nbsp; AÇÃO</small>
     </div>
     """,unsafe_allow_html=True)
 
-# -------------------------------------------------------
-# PAGES
-# -------------------------------------------------------
-page = st.session_state["page"]
+# ============================================================
+# COCKPIT
+# ============================================================
+page=st.session_state.page
 
-if page == "Cockpit Executivo":
-    header("Cockpit Executivo","Visão integrada da performance da operação e do impacto no resultado.")
+if page=="Cockpit Executivo":
+    page_header("Cockpit Executivo","Performance operacional e impacto financeiro em uma única leitura.")
 
     cols=st.columns(6,gap="small")
-    for c,item in zip(cols,cards):
-        with c:
+    for col,item in zip(cols,D["cards"]):
+        with col:
             st.markdown(kpi_card(*item),unsafe_allow_html=True)
 
     st.write("")
-    c1,c2,c3=st.columns([1.03,1.22,.72],gap="small")
+    left,mid,right=st.columns([1.0,1.25,.72],gap="small")
 
-    with c1:
-        st.markdown(kpi_table_html(),unsafe_allow_html=True)
+    with left:
+        st.markdown(table_kpis(),unsafe_allow_html=True)
 
-    with c2:
-        st.markdown('<div class="panel"><div class="panel-title">Evolução da Performance</div><div class="panel-sub">Produção realizada x meta e tendência do OEE</div>',unsafe_allow_html=True)
+    with mid:
+        st.markdown('<div class="panel h360">',unsafe_allow_html=True)
+        panel_title("Tendência de Produção","Realizado versus plano — últimos períodos")
+        trend=D["trend"].copy()
+        if "data" in trend.columns:
+            x=trend["data"]
+        else:
+            x=np.arange(len(trend))
         fig=go.Figure()
-        fig.add_bar(x=perf["Mês"],y=perf["Meta Produção"],name="Meta",marker_color="#DCE6F0")
-        fig.add_bar(x=perf["Mês"],y=perf["Produção"],name="Realizado",marker_color=BLUE)
-        fig.add_trace(go.Scatter(x=perf["Mês"],y=perf["OEE"]*60000,mode="lines+markers",name="OEE",
-                                 line=dict(color=ORANGE,width=3)))
-        fig.update_layout(height=300,margin=dict(l=0,r=0,t=5,b=0),barmode="overlay",
-                          paper_bgcolor="white",plot_bgcolor="white",
-                          legend=dict(orientation="h",y=1.10),
-                          xaxis=dict(showgrid=False),yaxis=dict(gridcolor="#EEF2F6"))
+        fig.add_trace(go.Scatter(
+            x=x,y=trend["planejado"],name="Plano",
+            mode="lines",line=dict(color="#AFC0D0",width=2,dash="dot")
+        ))
+        fig.add_trace(go.Scatter(
+            x=x,y=trend["realizado"],name="Realizado",
+            mode="lines",line=dict(color=BLUE,width=3),
+            fill="tozeroy",fillcolor="rgba(11,95,165,.08)"
+        ))
+        fig.update_layout(
+            height=292,margin=dict(l=4,r=4,t=12,b=8),
+            paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="rgba(0,0,0,0)",
+            legend=dict(orientation="h",y=1.09,x=0,font=dict(size=10)),
+            xaxis=dict(showgrid=False,zeroline=False,tickfont=dict(size=9,color=MUTED)),
+            yaxis=dict(gridcolor="#EEF2F6",zeroline=False,tickfont=dict(size=9,color=MUTED)),
+            hovermode="x unified"
+        )
         st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
         st.markdown('</div>',unsafe_allow_html=True)
 
-    with c3:
-        st.markdown('<div class="panel"><div class="panel-title">Status da Fábrica</div><div class="panel-sub">Saúde consolidada dos indicadores</div>',unsafe_allow_html=True)
-        fig=go.Figure(go.Pie(labels=["Em linha","Atenção","Crítico"],values=[5,2,1],hole=.65,
-                             marker=dict(colors=[GREEN,ORANGE,RED]),textinfo="none"))
-        fig.update_layout(height=165,margin=dict(l=0,r=0,t=0,b=0),showlegend=False,
-                          annotations=[dict(text="<b>62%</b><br><span style='font-size:10px'>em linha</span>",
-                                            x=.5,y=.5,showarrow=False)])
+    with right:
+        st.markdown('<div class="panel h360">',unsafe_allow_html=True)
+        panel_title("Saúde da Fábrica","Status consolidado dos KPIs")
+        scores=[x[3] for x in D["kpis"]]
+        green=sum(1 for s in scores if s>=0)
+        orange=sum(1 for s in scores if -0.10<=s<0)
+        red=sum(1 for s in scores if s<-0.10)
+        total=max(1,len(scores))
+        fig=go.Figure(go.Pie(
+            labels=["Em linha","Atenção","Crítico"],
+            values=[green,orange,red],
+            hole=.72,
+            marker=dict(colors=[GREEN,ORANGE,RED],line=dict(width=0)),
+            textinfo="none",
+            hovertemplate="%{label}: %{value}<extra></extra>"
+        ))
+        pct=int(round(green/total*100))
+        fig.update_layout(
+            height=210,margin=dict(l=0,r=0,t=4,b=0),showlegend=False,
+            paper_bgcolor="rgba(0,0,0,0)",
+            annotations=[dict(text=f"<b>{pct}%</b><br><span style='font-size:10px'>em linha</span>",
+                              x=.5,y=.5,showarrow=False,font=dict(size=16,color=TEXT))]
+        )
         st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
-        st.markdown(f"""
-        <div style="font-size:.69rem;color:{MUTED}">
-        <span class='status-dot' style='background:{GREEN}'></span>5 em linha &nbsp;
-        <span class='status-dot' style='background:{ORANGE}'></span>2 atenção &nbsp;
-        <span class='status-dot' style='background:{RED}'></span>1 crítico
-        </div>
-        </div>
-        """,unsafe_allow_html=True)
-
+        st.markdown(
+            f"<div class='small'><span class='dot' style='background:{GREEN}'></span>{green} em linha&nbsp;&nbsp;"
+            f"<span class='dot' style='background:{ORANGE}'></span>{orange} atenção&nbsp;&nbsp;"
+            f"<span class='dot' style='background:{RED}'></span>{red} crítico</div>",
+            unsafe_allow_html=True
+        )
         st.write("")
-        st.markdown(f"""
-        <div class="panel">
-          <div class="panel-title">Estrutura de Custos</div>
-          <div style="height:12px;border-radius:8px;overflow:hidden;display:flex;margin:8px 0 10px">
-            <div style="width:63%;background:{BLUE}"></div>
-            <div style="width:37%;background:#B7D8EF"></div>
-          </div>
-          <div style="display:flex;justify-content:space-between;font-size:.76rem">
-            <div><span style="color:{MUTED}">Variável</span><br><b>63%</b></div>
-            <div style="text-align:right"><span style="color:{MUTED}">Fixo</span><br><b>37%</b></div>
-          </div>
-        </div>
-        """,unsafe_allow_html=True)
+        var=D["cost_structure"]["Variável"]; fixed=D["cost_structure"]["Fixo"]; totalc=max(1,var+fixed)
+        vp=var/totalc*100; fp=fixed/totalc*100
+        st.markdown(
+            f"<div class='panel-sub' style='margin-top:6px'>Estrutura de custos</div>"
+            f"<div style='height:9px;border-radius:6px;overflow:hidden;display:flex'>"
+            f"<div style='width:{vp:.1f}%;background:{BLUE}'></div>"
+            f"<div style='width:{fp:.1f}%;background:#BBD8EC'></div></div>"
+            f"<div style='display:flex;justify-content:space-between;margin-top:6px;font-size:.62rem'>"
+            f"<span>Variável <b>{vp:.0f}%</b></span><span>Fixo <b>{fp:.0f}%</b></span></div>",
+            unsafe_allow_html=True
+        )
+        st.markdown('</div>',unsafe_allow_html=True)
 
     st.write("")
-    c1,c2,c3=st.columns([1.02,1.08,.8],gap="small")
+    c1,c2,c3=st.columns([1.02,1.05,.88],gap="small")
 
     with c1:
-        st.markdown('<div class="panel"><div class="panel-title">Top 5 Impactos no DRE</div><div class="panel-sub">Efeito estimado sobre EBITDA no mês</div>',unsafe_allow_html=True)
-        df=dre_impacts.sort_values("R$ mil")
-        fig=px.bar(df,x="R$ mil",y="Impacto",orientation="h",text="R$ mil")
-        fig.update_traces(marker_color="#F24B4B",texttemplate="R$ %{text} mil",textposition="outside")
-        fig.update_layout(height=245,margin=dict(l=0,r=30,t=0,b=0),paper_bgcolor="white",plot_bgcolor="white",
-                          yaxis_title=None,xaxis_title=None,xaxis=dict(gridcolor="#EEF2F6"))
+        st.markdown('<div class="panel h315">',unsafe_allow_html=True)
+        panel_title("Impactos no Resultado","Principais perdas traduzidas em R$")
+        imp=D["impacts"].sort_values("R$").tail(5)
+        fig=go.Figure(go.Bar(
+            x=imp["R$"],y=imp["Impacto"],orientation="h",
+            marker=dict(color="#E85B55"),
+            text=[fmt_money(v,0) for v in imp["R$"]],
+            textposition="outside",
+            hovertemplate="%{y}<br>%{text}<extra></extra>"
+        ))
+        fig.update_layout(
+            height=250,margin=dict(l=4,r=72,t=8,b=8),
+            paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="rgba(0,0,0,0)",
+            xaxis=dict(showgrid=False,showticklabels=False,zeroline=False),
+            yaxis=dict(showgrid=False,tickfont=dict(size=9,color=TEXT)),
+            showlegend=False
+        )
         st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
         st.markdown('</div>',unsafe_allow_html=True)
 
     with c2:
-        st.markdown('<div class="panel"><div class="panel-title">Alavancas com Maior Potencial</div><div class="panel-sub">Prioridade por impacto financeiro</div>',unsafe_allow_html=True)
-        for _,r in levers.iterrows():
+        st.markdown('<div class="panel h315">',unsafe_allow_html=True)
+        panel_title("Alavancas Prioritárias","Onde atacar primeiro para recuperar resultado")
+        lev=[
+            ("Disponibilidade","Linha 3",312000,"Alta"),
+            ("Refugo","Produto A",214000,"Alta"),
+            ("Setup","Linha 2",96000,"Média"),
+            ("Horas extras","Operação",88000,"Média"),
+            ("Consumo MP","Mix",72000,"Baixa"),
+        ]
+        for name,scope,impact,prio in lev:
+            if prio=="Alta": bc,bg=RED,"#FFF0EF"
+            elif prio=="Média": bc,bg=ORANGE,"#FFF5E9"
+            else: bc,bg=GREEN,"#EAF8F2"
             st.markdown(
-                f"<div style='display:grid;grid-template-columns:1.7fr .8fr 1fr .7fr;gap:7px;padding:7px 0;"
-                f"border-bottom:1px solid #EEF2F6;font-size:.71rem;align-items:center'>"
-                f"<div><b>{r['Alavanca']}</b></div><div>{r['Gap Atual']}</div><div>{r['Impacto Potencial']}</div>"
-                f"<div>{priority_badge(r['Prioridade'])}</div></div>",
+                f"<div style='display:grid;grid-template-columns:1.35fr .8fr .9fr .58fr;gap:7px;"
+                f"align-items:center;padding:8px 0;border-bottom:1px solid #EEF2F6;font-size:.67rem'>"
+                f"<div><b>{name}</b><br><span style='color:{MUTED};font-size:.58rem'>{scope}</span></div>"
+                f"<div>{fmt_money(impact,0)}</div>"
+                f"<div style='color:{MUTED}'>potencial</div>"
+                f"<div><span class='priority' style='color:{bc};background:{bg}'>{prio}</span></div></div>",
                 unsafe_allow_html=True
             )
-        st.write("")
-        if st.button("Abrir todas as alavancas",use_container_width=True):
-            navigate("Alavancas de Valor")
         st.markdown('</div>',unsafe_allow_html=True)
+        if st.button("Abrir alavancas",use_container_width=True):
+            nav("Alavancas de Valor")
 
     with c3:
-        st.markdown('<div class="panel"><div class="panel-title">Principais Alertas do Mês</div>',unsafe_allow_html=True)
-        for a in alerts:
-            st.markdown(alert_html(*a),unsafe_allow_html=True)
-        st.write("")
-        if st.button("Ver diagnóstico completo",use_container_width=True):
-            navigate("Diagnóstico e Causas")
+        st.markdown('<div class="panel h315">',unsafe_allow_html=True)
+        panel_title("Alertas Executivos","Desvios que exigem atenção")
+        alerts=[
+            ("Crítico",RED,"OEE da Linha 3 abaixo da meta","Principal pressão sobre disponibilidade."),
+            ("Crítico",RED,"Refugo acima da referência","Pressão direta sobre custo variável."),
+            ("Atenção",ORANGE,"Horas extras elevadas","Crescimento sem ganho proporcional de volume."),
+            ("Atenção",ORANGE,"Custo unitário pressionado","Revisar mix, volume e consumo específico."),
+        ]
+        for _,color,title,sub in alerts:
+            st.markdown(
+                f"<div class='alert'><div class='alert-icon' style='background:{color}'>!</div>"
+                f"<div><div class='alert-title'>{title}</div><div class='alert-sub'>{sub}</div></div></div>",
+                unsafe_allow_html=True
+            )
         st.markdown('</div>',unsafe_allow_html=True)
+        if st.button("Abrir diagnóstico",use_container_width=True):
+            nav("Diagnóstico e Causas")
 
     st.write("")
-    c1,c2=st.columns([1.5,.7],gap="small")
-    with c1:
-        st.markdown("""
-        <div class="agent-box">
-          <div style="font-weight:850;color:#10233F;margin-bottom:6px">✦ Diagnóstico Executivo</div>
-          <div style="font-size:.79rem;color:#304158;line-height:1.45">
-          A fábrica fechou agosto <b>8,3% abaixo da meta de produção</b>, com impacto estimado de
-          <b>R$ 500 mil no EBITDA</b>. O principal fator foi a menor disponibilidade da Linha 3,
-          seguida pelo aumento de refugo e horas extras.
-          </div>
-          <div style="font-size:.74rem;color:#304158;margin-top:8px">
-          <b>Prioridades:</b> paradas não planejadas da Linha 3; redução de refugo; revisão de turnos e horas extras.
-          </div>
+    st.markdown("""
+    <div class="agent-strip">
+      <div>
+        <div class="agent-title">✦ Diagnóstico Executivo</div>
+        <div class="agent-copy">
+        O desempenho do período está sendo pressionado principalmente por disponibilidade,
+        refugo e custo de conversão. O foco deve ser recuperar volume sem ampliar a estrutura de custo.
         </div>
-        """,unsafe_allow_html=True)
-    with c2:
-        st.markdown("""
-        <div class="agent-dark">
-          <div style="font-weight:850;margin-bottom:5px">Agente de Performance</div>
-          <div style="font-size:.71rem;color:#B9CEE0">Investigue causas, simule cenários e priorize ações.</div>
+      </div>
+      <div>
+        <div class="agent-title">3 prioridades</div>
+        <div class="agent-copy">
+        1. Recuperar disponibilidade da Linha 3<br>
+        2. Atacar refugo acima da meta<br>
+        3. Redimensionar horas extras e turnos
         </div>
-        """,unsafe_allow_html=True)
-        if st.button("Conversar com o agente",type="primary",use_container_width=True):
-            navigate("Agente de Performance")
+      </div>
+    </div>
+    """,unsafe_allow_html=True)
+    st.write("")
+    if st.button("Conversar com o Agente de Performance",type="primary"):
+        nav("Agente de Performance")
 
-elif page == "Performance Operacional":
-    header("Performance Operacional","Abertura por linha, máquina, produto e turno.")
+# ============================================================
+# OPERATIONS
+# ============================================================
+elif page=="Performance Operacional":
+    page_header("Performance Operacional","Abertura de eficiência, perdas e capacidade por linha.")
+    lp=D["line_perf"].copy()
     c1,c2,c3,c4=st.columns(4,gap="small")
-    c1.metric("OEE Médio","71,4%","-6,6 pp")
-    c2.metric("Disponibilidade","74,8%","-5,2 pp")
-    c3.metric("Performance","94,5%","+0,8 pp")
-    c4.metric("Qualidade","98,1%","-0,4 pp")
+    c1.metric("OEE",fmt_pct(D["oee"]),f"{(D['oee']-D['target_oee'])*100:+.1f} pp".replace(".",","))
+    c2.metric("Disponibilidade",fmt_pct(lp["Disponibilidade"].mean()),"média das linhas")
+    c3.metric("Qualidade",fmt_pct(lp["Qualidade"].mean()),"média das linhas")
+    c4.metric("Refugo",fmt_pct(D["scrap"]),f"meta {fmt_pct(D['target_scrap'])}")
     st.write("")
     c1,c2=st.columns(2,gap="small")
     with c1:
-        st.markdown('<div class="panel"><div class="panel-title">OEE por Linha</div>',unsafe_allow_html=True)
-        fig=px.bar(line_perf,x="Linha",y="OEE",text=line_perf["OEE"].map(lambda x:f"{x:.1%}"))
-        fig.update_traces(marker_color=[GREEN,ORANGE,RED,ORANGE],textposition="outside")
-        fig.update_yaxes(tickformat=".0%",range=[0,1])
-        fig.update_layout(height=330,margin=dict(l=0,r=0,t=5,b=0),paper_bgcolor="white",plot_bgcolor="white")
+        st.markdown('<div class="panel">',unsafe_allow_html=True)
+        panel_title("OEE por Linha","Comparação direta com a referência")
+        colors=[score_color(safe_div(v,D["target_oee"])-1) for v in lp["OEE"]]
+        fig=go.Figure(go.Bar(
+            x=lp["Linha"],y=lp["OEE"],marker_color=colors,
+            text=[fmt_pct(x) for x in lp["OEE"]],textposition="outside"
+        ))
+        fig.add_hline(y=D["target_oee"],line_dash="dot",line_color="#9AAABD",annotation_text="Meta")
+        fig.update_layout(height=310,margin=dict(l=0,r=0,t=10,b=0),paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="rgba(0,0,0,0)",
+                          yaxis=dict(tickformat=".0%",gridcolor="#EEF2F6",range=[0,1]),xaxis=dict(showgrid=False),showlegend=False)
         st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
         st.markdown('</div>',unsafe_allow_html=True)
     with c2:
-        st.markdown('<div class="panel"><div class="panel-title">Paradas x Gap de Produção</div>',unsafe_allow_html=True)
-        fig=px.scatter(line_perf,x="Paradas h",y="Gap Produção",size="Paradas h",text="Linha")
-        fig.update_traces(marker_color=BLUE,textposition="top center")
-        fig.update_layout(height=330,margin=dict(l=0,r=0,t=5,b=0),paper_bgcolor="white",plot_bgcolor="white")
+        st.markdown('<div class="panel">',unsafe_allow_html=True)
+        panel_title("Paradas x Gap de Produção","Quanto mais à direita e abaixo, pior")
+        fig=go.Figure(go.Scatter(
+            x=lp["Paradas h"],y=lp["Gap Produção"],mode="markers+text",
+            text=lp["Linha"],textposition="top center",
+            marker=dict(size=np.clip(lp["Paradas h"],16,42),color=BLUE,opacity=.8,line=dict(width=2,color="white"))
+        ))
+        fig.update_layout(height=310,margin=dict(l=0,r=0,t=10,b=0),paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="rgba(0,0,0,0)",
+                          xaxis=dict(gridcolor="#EEF2F6"),yaxis=dict(gridcolor="#EEF2F6"))
         st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
         st.markdown('</div>',unsafe_allow_html=True)
     st.write("")
-    st.dataframe(line_perf,use_container_width=True,hide_index=True)
+    st.dataframe(lp,use_container_width=True,hide_index=True)
 
-elif page == "Diagnóstico e Causas":
-    header("Diagnóstico e Causas","Do desvio executivo à causa-raiz operacional.")
-    c1,c2=st.columns(2,gap="small")
-    with c1:
-        st.markdown('<div class="panel"><div class="panel-title">Pareto de Causas</div>',unsafe_allow_html=True)
-        df=causes.sort_values("Horas")
-        fig=px.bar(df,x="Horas",y="Causa",orientation="h",text="Horas")
-        fig.update_traces(marker_color=BLUE)
-        fig.update_layout(height=330,margin=dict(l=0,r=0,t=5,b=0),paper_bgcolor="white",plot_bgcolor="white")
-        st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
-        st.markdown('</div>',unsafe_allow_html=True)
-    with c2:
-        st.markdown('<div class="panel"><div class="panel-title">Impacto Financeiro por Causa</div>',unsafe_allow_html=True)
-        df=causes.sort_values("Impacto R$ mil")
-        fig=px.bar(df,x="Impacto R$ mil",y="Causa",orientation="h",text="Impacto R$ mil")
-        fig.update_traces(marker_color=RED)
-        fig.update_layout(height=330,margin=dict(l=0,r=0,t=5,b=0),paper_bgcolor="white",plot_bgcolor="white")
-        st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
-        st.markdown('</div>',unsafe_allow_html=True)
+# ============================================================
+# DIAGNOSTICS
+# ============================================================
+elif page=="Diagnóstico e Causas":
+    page_header("Diagnóstico e Causas","Do desvio executivo à causa operacional.")
+    causes=D["causes"].copy()
+    if causes.empty:
+        st.info("Não há dados de causas suficientes para este período.")
+    else:
+        c1,c2=st.columns(2,gap="small")
+        with c1:
+            st.markdown('<div class="panel">',unsafe_allow_html=True)
+            panel_title("Pareto de Horas Perdidas","Principais causas de parada")
+            df=causes.sort_values("Horas")
+            fig=go.Figure(go.Bar(x=df["Horas"],y=df["Causa"],orientation="h",marker_color=BLUE,
+                                 text=[f"{x:.0f} h" for x in df["Horas"]],textposition="outside"))
+            fig.update_layout(height=315,margin=dict(l=0,r=55,t=8,b=0),paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="rgba(0,0,0,0)",
+                              xaxis=dict(showgrid=False,showticklabels=False),yaxis=dict(showgrid=False))
+            st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
+            st.markdown('</div>',unsafe_allow_html=True)
+        with c2:
+            st.markdown('<div class="panel">',unsafe_allow_html=True)
+            panel_title("Impacto Financeiro por Causa","Estimativa gerencial")
+            df=causes.sort_values("Impacto R$ mil")
+            fig=go.Figure(go.Bar(x=df["Impacto R$ mil"],y=df["Causa"],orientation="h",marker_color="#E85B55",
+                                 text=[f"R$ {x:.0f} mil" for x in df["Impacto R$ mil"]],textposition="outside"))
+            fig.update_layout(height=315,margin=dict(l=0,r=75,t=8,b=0),paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="rgba(0,0,0,0)",
+                              xaxis=dict(showgrid=False,showticklabels=False),yaxis=dict(showgrid=False))
+            st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
+            st.markdown('</div>',unsafe_allow_html=True)
     st.write("")
     st.markdown("""
     <div class="panel">
       <div class="panel-title">Árvore de Diagnóstico</div>
-      <div style="font-size:.82rem;line-height:1.8;color:#304158">
-      <b>Produção abaixo da meta (-8,3%)</b><br>
-      &nbsp;&nbsp;↳ Linha 3 concentra 58% do gap<br>
-      &nbsp;&nbsp;&nbsp;&nbsp;↳ Disponibilidade é o componente mais fraco<br>
-      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;↳ MX-04 concentrou 37 h de parada corretiva<br>
-      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;↳ Falha mecânica é a principal causa<br>
-      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;↳ <b>Impacto estimado: R$ 164 mil</b>
+      <div class="panel-sub">Exemplo de encadeamento causal</div>
+      <div style="font-size:.76rem;line-height:1.9;color:#34465C">
+        <b>Produção abaixo da meta</b>
+        &nbsp;→&nbsp; Linha com maior gap
+        &nbsp;→&nbsp; Componente OEE mais fraco
+        &nbsp;→&nbsp; Equipamento / turno
+        &nbsp;→&nbsp; Causa dominante
+        &nbsp;→&nbsp; <b>impacto financeiro</b>
       </div>
     </div>
     """,unsafe_allow_html=True)
     st.write("")
     if st.button("Criar plano de ação",type="primary"):
-        navigate("Plano de Ação")
+        nav("Plano de Ação")
 
-elif page == "Finanças / DRE":
-    header("Finanças / DRE","Conecte desempenho operacional, estrutura de custos e resultado.")
+# ============================================================
+# FINANCE
+# ============================================================
+elif page=="Finanças / DRE":
+    page_header("Finanças / DRE","A operação traduzida em margem, custo fixo, variável e EBITDA.")
     c1,c2,c3,c4=st.columns(4,gap="small")
-    c1.metric("Receita Líquida","R$ 12,4 mi","-6,8%")
-    c2.metric("Margem de Contribuição","R$ 3,45 mi","-R$ 670 mil")
-    c3.metric("Custos Fixos","R$ 1,55 mi","R$ 170 mil melhor")
-    c4.metric("EBITDA Industrial","R$ 1,90 mi","-R$ 500 mil")
+    c1.metric("Receita Líquida",fmt_money(D["revenue"]))
+    c2.metric("Margem Contrib.",fmt_pct(D["margin"]))
+    c3.metric("EBITDA Industrial",fmt_money(D["ebitda"]))
+    totalc=sum(D["cost_structure"].values())
+    c4.metric("Custo Fixo",fmt_money(D["cost_structure"]["Fixo"]))
     st.write("")
-    c1,c2=st.columns([1.1,.9],gap="small")
+    c1,c2=st.columns([1.15,.85],gap="small")
     with c1:
-        st.markdown('<div class="panel"><div class="panel-title">DRE Gerencial</div>',unsafe_allow_html=True)
-        view=dre.copy()
-        view["Realizado"]=view["Realizado"].map(lambda x:f"R$ {x:.2f} mi".replace(".",","))
-        view["Meta"]=view["Meta"].map(lambda x:f"R$ {x:.2f} mi".replace(".",","))
+        st.markdown('<div class="panel">',unsafe_allow_html=True)
+        panel_title("DRE Gerencial","Visão resumida do resultado")
+        view=D["dre"].copy()
+        view["Realizado"]=view["Realizado"].map(lambda x:fmt_money(x))
         st.dataframe(view,use_container_width=True,hide_index=True)
         st.markdown('</div>',unsafe_allow_html=True)
     with c2:
-        st.markdown('<div class="panel"><div class="panel-title">Estrutura de Custos</div>',unsafe_allow_html=True)
-        cdf=costs.groupby("Tipo")["Realizado R$ mil"].sum().reset_index()
-        fig=px.pie(cdf,names="Tipo",values="Realizado R$ mil",hole=.62,
-                   color="Tipo",color_discrete_map={"Variável":BLUE,"Fixo":"#B7D8EF"})
-        fig.update_layout(height=280,margin=dict(l=0,r=0,t=0,b=0))
+        st.markdown('<div class="panel">',unsafe_allow_html=True)
+        panel_title("Custo Fixo x Variável","Estrutura econômica da operação")
+        vals=D["cost_structure"]
+        fig=go.Figure(go.Pie(labels=list(vals.keys()),values=list(vals.values()),hole=.68,
+                             marker=dict(colors=[BLUE,"#BBD8EC"]),textinfo="percent",
+                             textfont=dict(size=12)))
+        fig.update_layout(height=275,margin=dict(l=0,r=0,t=4,b=0),legend=dict(orientation="h",y=-.05),
+                          paper_bgcolor="rgba(0,0,0,0)")
         st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
         st.markdown('</div>',unsafe_allow_html=True)
-    st.write("")
-    st.markdown('<div class="panel"><div class="panel-title">Bridge do EBITDA</div>',unsafe_allow_html=True)
-    fig=go.Figure(go.Waterfall(
-        x=["Meta EBITDA","Volume","Refugo","Horas extras","Manutenção","Consumo MP","Realizado"],
-        measure=["absolute","relative","relative","relative","relative","relative","total"],
-        y=[2400,-220,-110,-95,-75,-48,0],
-        decreasing={"marker":{"color":RED}},
-        increasing={"marker":{"color":GREEN}},
-        totals={"marker":{"color":BLUE}},
-    ))
-    fig.update_layout(height=330,margin=dict(l=0,r=0,t=10,b=0),paper_bgcolor="white",plot_bgcolor="white")
-    st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
-    st.markdown('</div>',unsafe_allow_html=True)
-    st.write("")
-    cc=costs.copy()
-    cc["Desvio R$ mil"]=cc["Realizado R$ mil"]-cc["Orçamento R$ mil"]
-    st.dataframe(cc,use_container_width=True,hide_index=True)
 
-elif page == "Alavancas de Valor":
-    header("Alavancas de Valor","Priorize ações pela capacidade de recuperar margem e EBITDA.")
+# ============================================================
+# LEVERS
+# ============================================================
+elif page=="Alavancas de Valor":
+    page_header("Alavancas de Valor","Simule cenários e priorize a recuperação de margem.")
+    levers=pd.DataFrame({
+        "Alavanca":["Disponibilidade Linha 3","Redução de refugo","Otimização de setup","Horas extras","Consumo específico MP"],
+        "Impacto potencial":["R$ 312 mil","R$ 214 mil","R$ 96 mil","R$ 88 mil","R$ 72 mil"],
+        "Prioridade":["Alta","Alta","Média","Média","Baixa"]
+    })
     st.dataframe(levers,use_container_width=True,hide_index=True)
     st.write("")
-    st.markdown('<div class="panel"><div class="panel-title">Simulador de Alavancas</div><div class="panel-sub">Teste cenários e veja o impacto potencial</div>',unsafe_allow_html=True)
-    c1,c2,c3=st.columns(3)
-    oee=c1.slider("OEE alvo",65.0,90.0,80.0,.5)
-    scrap=c2.slider("Refugo alvo (%)",1.0,5.0,2.5,.1)
-    overtime=c3.slider("Redução de horas extras (%)",0,50,20)
-    impact=max(0,oee-71.4)*38 + max(0,3.8-scrap)*82 + overtime*2.2
-    st.success(f"Impacto potencial indicativo no EBITDA: R$ {impact:,.0f} mil".replace(",","."))
-    if st.button("Transformar cenário em plano de ação",type="primary"):
-        navigate("Plano de Ação")
+    st.markdown('<div class="panel">',unsafe_allow_html=True)
+    panel_title("Simulador de Cenários","Teste o efeito de diferentes níveis de performance")
+    a,b,c=st.columns(3)
+    oee=a.slider("OEE alvo",65.0,90.0,max(80.0,D["oee"]*100),.5)
+    scrap=b.slider("Refugo alvo (%)",1.0,5.0,min(2.5,D["scrap"]*100),.1)
+    overtime=c.slider("Redução horas extras (%)",0,50,20)
+    impact=max(0,oee-D["oee"]*100)*38000 + max(0,D["scrap"]*100-scrap)*82000 + overtime*2200
+    st.success(f"Potencial indicativo de recuperação: {fmt_money(impact)}")
+    st.caption("Simulação gerencial. Na versão integrada, os coeficientes serão específicos por planta, produto e processo.")
     st.markdown('</div>',unsafe_allow_html=True)
-
-elif page == "Plano de Ação":
-    header("Plano de Ação","Transforme diagnóstico em execução, responsabilidade e captura de valor.")
-    if "actions" not in st.session_state:
-        st.session_state["actions"]=actions_df.copy()
-    st.dataframe(st.session_state["actions"],use_container_width=True,hide_index=True)
     st.write("")
-    with st.form("new_action",clear_on_submit=True):
-        c1,c2=st.columns(2)
-        problema=c1.text_input("Problema / oportunidade")
-        responsavel=c2.text_input("Responsável")
-        acao=st.text_area("Ação")
-        c3,c4,c5=st.columns(3)
-        prazo=c3.text_input("Prazo",placeholder="dd/mm/aaaa")
-        prioridade=c4.selectbox("Prioridade",["Alta","Média","Baixa"])
-        impacto=c5.text_input("Impacto esperado",placeholder="R$ 100 mil")
-        submitted=st.form_submit_button("Adicionar ação",type="primary")
-        if submitted and problema and acao:
-            new=pd.DataFrame([{
-                "Prioridade":prioridade,
-                "Problema":problema,
-                "Ação":acao,
-                "Responsável":responsavel,
-                "Prazo":prazo,
-                "Impacto":impacto,
-                "Status":"Planejado"
-            }])
-            st.session_state["actions"]=pd.concat([st.session_state["actions"],new],ignore_index=True)
-            st.success("Ação adicionada.")
+    if st.button("Transformar cenário em plano de ação",type="primary"):
+        nav("Plano de Ação")
+
+# ============================================================
+# ACTION PLAN
+# ============================================================
+elif page=="Plano de Ação":
+    page_header("Plano de Ação","Responsabilidade, prazo e captura de valor.")
+    st.dataframe(st.session_state.actions,use_container_width=True,hide_index=True)
+    st.write("")
+    with st.form("action_form",clear_on_submit=True):
+        a,b=st.columns(2)
+        problema=a.text_input("Problema / oportunidade")
+        responsavel=b.text_input("Responsável")
+        acao=st.text_area("Ação recomendada")
+        c,d,e=st.columns(3)
+        prazo=c.text_input("Prazo",placeholder="dd/mm/aaaa")
+        prioridade=d.selectbox("Prioridade",["Alta","Média","Baixa"])
+        impacto=e.text_input("Impacto esperado",placeholder="R$ 100 mil")
+        ok=st.form_submit_button("Adicionar ação",type="primary")
+        if ok and problema and acao:
+            new=pd.DataFrame([[prioridade,problema,acao,responsavel,prazo,impacto,"Planejado"]],
+                             columns=st.session_state.actions.columns)
+            st.session_state.actions=pd.concat([st.session_state.actions,new],ignore_index=True)
+            st.success("Ação adicionada ao plano.")
             st.rerun()
 
-elif page == "Agente de Performance":
-    header("Agente de Performance","Investigue causas, simule cenários e transforme análise em decisão.")
-    st.markdown("""
-    <div class="agent-box">
-      <div style="font-weight:850;margin-bottom:6px">Resumo executivo do período</div>
-      <div style="font-size:.79rem;color:#304158;line-height:1.45">
-      A operação está abaixo da meta em produção, OEE e margem de contribuição. A Linha 3 concentra
-      a maior parcela do gap operacional. As maiores oportunidades estão em disponibilidade, refugo
-      e horas extras.
+# ============================================================
+# AGENT
+# ============================================================
+elif page=="Agente de Performance":
+    page_header("Agente de Performance","Pergunte aos dados e transforme análise em decisão.")
+    if "chat" not in st.session_state:
+        st.session_state.chat=[]
+    st.markdown(f"""
+    <div class="agent-strip">
+      <div>
+        <div class="agent-title">Resumo do período</div>
+        <div class="agent-copy">
+        Produção em <b>{D["attainment"]:.1%}</b> do plano, OEE em <b>{D["oee"]:.1%}</b>,
+        refugo em <b>{D["scrap"]:.1%}</b> e margem de contribuição em <b>{D["margin"]:.1%}</b>.
+        </div>
+      </div>
+      <div>
+        <div class="agent-title">Perguntas úteis</div>
+        <div class="agent-copy">O que mais destruiu margem? · Qual linha priorizar? · Quanto ganho elevando o OEE?</div>
       </div>
     </div>
     """,unsafe_allow_html=True)
     st.write("")
-    if "chat" not in st.session_state:
-        st.session_state["chat"]=[]
-    for role,msg in st.session_state["chat"]:
+    for role,msg in st.session_state.chat:
         st.chat_message(role).write(msg)
     q=st.chat_input("Ex.: Qual o impacto de elevar o OEE para 80%?")
     if q:
-        st.session_state["chat"].append(("user",q))
+        st.session_state.chat.append(("user",q))
         ql=q.lower()
         if "oee" in ql:
-            ans="Elevar o OEE de 71,4% para 80% representa potencial indicativo de aproximadamente R$ 327 mil em EBITDA, principalmente pela recuperação de disponibilidade da Linha 3."
-        elif "refugo" in ql:
-            ans="Reduzir o refugo de 3,8% para 2,5% representa potencial indicativo de R$ 107 mil no período, principalmente por menor consumo de matéria-prima e retrabalho."
+            ans=f"O OEE atual é {fmt_pct(D['oee'])}. O maior potencial está na recuperação de disponibilidade. O simulador de Alavancas permite testar a meta desejada."
         elif "linha" in ql:
-            ans="A Linha 3 é a principal prioridade: OEE de 64%, maior volume de paradas e maior contribuição para o gap de produção."
-        elif "ebitda" in ql or "margem" in ql:
-            ans="O principal gap de EBITDA vem de menor volume produzido, seguido por refugo, horas extras e manutenção corretiva."
+            worst=D["line_perf"].sort_values("OEE").iloc[0]
+            ans=f"A prioridade é {worst['Linha']}, com OEE de {fmt_pct(worst['OEE'])} e {worst['Paradas h']:.0f} horas de parada no período."
+        elif "margem" in ql or "ebitda" in ql:
+            top=D["impacts"].sort_values("R$",ascending=False).iloc[0]
+            ans=f"A maior pressão estimada sobre o resultado vem de {top['Impacto']}, com impacto indicativo de {fmt_money(top['R$'])}."
         else:
-            ans="Os três focos prioritários são: recuperar disponibilidade da Linha 3, reduzir refugo e rever horas extras. Juntos, representam o maior potencial de recuperação financeira."
-        st.session_state["chat"].append(("assistant",ans))
+            ans="As prioridades são disponibilidade, refugo e horas extras. Use as telas de Diagnóstico e Alavancas para abrir cada causa e simular o efeito financeiro."
+        st.session_state.chat.append(("assistant",ans))
         st.rerun()
 
-elif page == "Relatórios":
-    header("Relatórios","Fechamentos executivos, comitês de performance e materiais de gestão.")
-    st.markdown("""
-    <div class="panel">
-      <div class="panel-title">Relatórios disponíveis</div>
-      <div style="font-size:.82rem;line-height:1.8;color:#304158">
-      • Morning Industrial Brief<br>
-      • Fechamento semanal de performance<br>
-      • Comitê mensal de resultado<br>
-      • DRE operacional comentado<br>
-      • Top perdas e alavancas<br>
-      • Plano de ação e captura de valor
-      </div>
-    </div>
-    """,unsafe_allow_html=True)
-    st.write("")
-    report_text = """INDUSTRIAL PERFORMANCE - RESUMO EXECUTIVO
-Produção: 41.250 un | Meta: 45.000
-OEE: 71,4% | Meta: 78%
-Margem de contribuição: 27,8% | Meta: 31%
-EBITDA Industrial: R$ 1,9 mi | Gap estimado: R$ 500 mil
-
-Principais causas:
-1. Menor volume produzido
-2. Refugo acima da meta
-3. Horas extras
-4. Manutenção corretiva
+# ============================================================
+# REPORTS
+# ============================================================
+elif page=="Relatórios":
+    page_header("Relatórios","Resumo executivo e materiais para rotina de gestão.")
+    summary=f"""INDUSTRIAL PERFORMANCE — RESUMO EXECUTIVO
+Produção: {D["actual"]:,.0f} un
+Plano: {D["planned"]:,.0f} un
+Atingimento: {D["attainment"]:.1%}
+OEE: {D["oee"]:.1%}
+Refugo: {D["scrap"]:.1%}
+Margem de contribuição: {D["margin"]:.1%}
+EBITDA industrial: {fmt_money(D["ebitda"])}
 
 Prioridades:
-- Recuperar disponibilidade da Linha 3
-- Reduzir refugo
-- Revisar dimensionamento de turnos
+1. Recuperar disponibilidade
+2. Reduzir perdas de qualidade
+3. Ajustar horas extras / capacidade
 """
-    st.download_button("Baixar resumo executivo (.txt)",report_text,file_name="resumo_executivo.txt",type="primary")
+    st.markdown('<div class="panel"><div class="panel-title">Resumo Executivo</div><div class="panel-sub">Versão simples para validação do fluxo</div></div>',unsafe_allow_html=True)
+    st.write("")
+    st.download_button("Baixar resumo executivo",summary,file_name="industrial_performance_resumo.txt",type="primary")
 
-elif page == "Configurações":
-    header("Configurações","Cadastros, metas, estrutura de custos e futuras integrações.")
-    tabs=st.tabs(["Dados","Metas","DRE / Custos","Usuários","Integrações"])
+# ============================================================
+# SETTINGS / REAL UPLOAD
+# ============================================================
+elif page=="Configurações":
+    page_header("Configurações","Importe dados, valide o modelo e atualize o cockpit.")
+    tabs=st.tabs(["Importação de Dados","Metas","Estrutura de Custos","Integrações"])
     with tabs[0]:
-        uploaded=st.file_uploader("Carregar Excel / CSV",type=["xlsx","xls","csv"],accept_multiple_files=True)
-        if uploaded:
-            st.success(f"{len(uploaded)} arquivo(s) carregado(s). Próxima etapa: mapeador DE/PARA.")
+        st.markdown("#### Importar Excel")
+        st.caption("O arquivo deve conter as abas Produção, Qualidade, Manutenção, Pessoas e Custos. Metas é opcional.")
+        uploaded=st.file_uploader("Arquivo Excel",type=["xlsx","xls"],accept_multiple_files=False)
+        if uploaded is not None:
+            data,issues=parse_excel(uploaded.getvalue())
+            if issues:
+                st.error("O arquivo foi carregado, mas ainda não está compatível com o modelo.")
+                for issue in issues:
+                    st.write("•",issue)
+            else:
+                st.success("Arquivo validado. Clique abaixo para aplicar os dados ao cockpit.")
+                if st.button("Aplicar dados ao cockpit",type="primary"):
+                    st.session_state.real_data=data
+                    st.success("Dados aplicados.")
+                    st.session_state.page="Cockpit Executivo"
+                    st.rerun()
+        if st.session_state.real_data is not None:
+            if st.button("Voltar para dados demo"):
+                st.session_state.real_data=None
+                st.rerun()
     with tabs[1]:
-        metas=pd.DataFrame({
-            "Indicador":[k[0] for k in kpis],
-            "Meta":[k[2] for k in kpis]
-        })
-        st.data_editor(metas,use_container_width=True,hide_index=True)
+        st.info("Na próxima evolução, as metas serão editáveis e persistentes por indicador, linha e período.")
     with tabs[2]:
-        st.data_editor(costs,use_container_width=True,hide_index=True)
+        st.info("A estrutura de custos já entra no cálculo. A próxima evolução será o plano de contas gerencial e o DE/PARA.")
     with tabs[3]:
-        st.info("Perfis previstos: CEO, COO, CFO, Diretor Industrial, Gerente, Controller e Analista.")
-    with tabs[4]:
-        st.info("Roadmap: ERP, MES, WMS, CMMS, SQL e APIs.")
+        st.info("Roadmap de integração: ERP, MES, WMS, CMMS, SQL e APIs.")
