@@ -9,6 +9,8 @@ import unicodedata
 import base64
 from urllib.parse import quote
 
+import industrial_data_layer as idl
+
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -962,7 +964,7 @@ def calculate_real(data):
         if setup_mask.any():
             setup_avg_min=float(m.loc[setup_mask,"duracao_horas"].mean()*60)
 
-    causes=m.groupby("causa",as_index=False)["duracao_horas"].sum().rename(columns={"duracao_horas":"Horas"})
+    causes=m.groupby("causa",as_index=False)["duracao_horas"].sum().rename(columns={"causa":"Causa","duracao_horas":"Horas"})
     if not causes.empty:
         margin_unit=safe_div(contrib,actual)
         units_h=safe_div(actual,max(1,actual_hh))
@@ -1469,6 +1471,505 @@ def page_header(title, subtitle):
     st.markdown(f'<div class="page-title">{title}</div>',unsafe_allow_html=True)
     st.markdown(f'<div class="page-subtitle">{subtitle}</div>',unsafe_allow_html=True)
 
+def admin_header(title, subtitle):
+    st.markdown('<div class="eyebrow">INDUSTRIAL DATA LAYER · v0.6.3</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="page-title">{title}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="page-subtitle">{subtitle}</div>', unsafe_allow_html=True)
+
+
+def _idl_init_state():
+    defaults = {
+        "idl_step": 1,
+        "idl_raw": None,
+        "idl_filename": "",
+        "idl_file_hash": "",
+        "idl_profile": None,
+        "idl_mapping": None,
+        "idl_mapping_rev": 0,
+        "idl_standard": None,
+        "idl_lineage": None,
+        "idl_quality_checks": None,
+        "idl_quality_summary": None,
+        "idl_company": "Grupo Industrial S.A.",
+        "idl_source": "Excel mensal",
+        "idl_last_record": None,
+        "idl_mapping_import_hash": "",
+    }
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
+
+def _idl_reset(keep_company=True):
+    company = st.session_state.get("idl_company", "Grupo Industrial S.A.")
+    source = st.session_state.get("idl_source", "Excel mensal")
+    for key in list(st.session_state.keys()):
+        if key.startswith("idl_"):
+            del st.session_state[key]
+    _idl_init_state()
+    if keep_company:
+        st.session_state.idl_company = company
+        st.session_state.idl_source = source
+
+
+def _idl_set_step(step):
+    st.session_state.idl_step = int(max(1, min(5, step)))
+    st.rerun()
+
+
+def _idl_stepper():
+    labels = ["Carregar", "Identificar", "Mapear", "Validar", "Aplicar"]
+    step = st.session_state.idl_step
+    st.progress(step / 5)
+    cols = st.columns(5, gap="small")
+    for i, (col, label) in enumerate(zip(cols, labels), start=1):
+        with col:
+            prefix = "●" if i == step else ("✓" if i < step else "○")
+            color = BLUE if i == step else (GREEN if i < step else MUTED)
+            st.markdown(
+                f'<div style="font-size:.68rem;font-weight:800;color:{color};text-align:center">{prefix} {i}. {label}</div>',
+                unsafe_allow_html=True,
+            )
+    st.write("")
+
+
+def _idl_confidence_text(value):
+    pct = float(value or 0) * 100
+    if pct >= 95:
+        return f"{pct:.0f}% · automático"
+    if pct >= 70:
+        return f"{pct:.0f}% · confirmar"
+    return f"{pct:.0f}% · revisar"
+
+
+def _idl_load_uploaded_file(uploaded):
+    raw = uploaded.getvalue()
+    digest = idl.workbook_fingerprint(raw)
+    if digest != st.session_state.idl_file_hash:
+        with st.spinner("Lendo estrutura, abas e campos do arquivo..."):
+            mapping = idl.build_initial_mapping(raw, uploaded.name)
+            profile = idl.inspect_workbook(raw, uploaded.name)
+        st.session_state.idl_raw = raw
+        st.session_state.idl_filename = uploaded.name
+        st.session_state.idl_file_hash = digest
+        st.session_state.idl_mapping = mapping
+        st.session_state.idl_profile = profile
+        st.session_state.idl_mapping_rev += 1
+        st.session_state.idl_standard = None
+        st.session_state.idl_lineage = None
+        st.session_state.idl_quality_checks = None
+        st.session_state.idl_quality_summary = None
+
+
+def _idl_apply_mapping_profile(profile_bytes):
+    try:
+        imported = idl.mapping_from_json(profile_bytes)
+        if not st.session_state.idl_raw:
+            st.warning("Carregue primeiro o Excel que receberá este mapeamento.")
+            return
+        imported = idl.refresh_column_mapping(st.session_state.idl_raw, imported)
+        st.session_state.idl_mapping = imported
+        st.session_state.idl_mapping_rev += 1
+        st.success("Perfil de mapeamento carregado. Revise as sugestões antes de aplicar.")
+    except Exception as exc:
+        st.error(f"Não foi possível ler o perfil de mapeamento: {exc}")
+
+
+def _idl_render_step_1():
+    st.markdown("### 1 · Carregar fonte")
+    st.caption("O arquivo original é preservado na camada RAW. Nesta versão piloto, o armazenamento local do Streamlit é temporário; o mapping também pode ser exportado em JSON.")
+
+    c1, c2 = st.columns(2, gap="small")
+    with c1:
+        st.session_state.idl_company = st.text_input("Empresa", value=st.session_state.idl_company, key="idl_company_input")
+    with c2:
+        st.session_state.idl_source = st.text_input("Fonte / sistema", value=st.session_state.idl_source, key="idl_source_input", help="Ex.: SAP Produção, TOTVS Custos, Excel Fechamento Industrial")
+
+    uploaded = st.file_uploader("Arquivo Excel", type=["xlsx", "xls"], accept_multiple_files=False, key="idl_excel_upload")
+    if uploaded is not None:
+        try:
+            _idl_load_uploaded_file(uploaded)
+        except Exception as exc:
+            st.error(f"Não foi possível ler o arquivo: {exc}")
+            return
+
+    if st.session_state.idl_profile:
+        p = st.session_state.idl_profile
+        cols = st.columns(4, gap="small")
+        cols[0].metric("Abas", p["sheet_count"])
+        cols[1].metric("Registros lidos", f"{p['total_rows']:,}".replace(",", "."))
+        cols[2].metric("Tamanho", f"{p['size_bytes']/1024:.0f} KB")
+        cols[3].metric("Fingerprint", p["hash"][:10].upper())
+
+        with st.expander("Ver estrutura detectada", expanded=False):
+            rows = []
+            for sh, info in p["sheets"].items():
+                suggestion = st.session_state.idl_mapping.get("sheet_map", {}).get(sh, {}) if st.session_state.idl_mapping else {}
+                rows.append({
+                    "Aba": sh,
+                    "Linhas": info["rows"],
+                    "Colunas": info["cols"],
+                    "Sugestão": idl.ENTITY_LABELS.get(suggestion.get("entity"), "Ignorar / informativa"),
+                    "Confiança": _idl_confidence_text(suggestion.get("confidence", 0)),
+                })
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+        saved = idl.load_saved_mapping(st.session_state.idl_company, st.session_state.idl_source)
+        if saved:
+            st.info("Encontramos um DE/PARA salvo para esta empresa e fonte neste ambiente piloto.")
+            if st.button("Reutilizar mapping salvo", key="idl_use_saved_mapping"):
+                st.session_state.idl_mapping = idl.refresh_column_mapping(st.session_state.idl_raw, saved)
+                st.session_state.idl_mapping_rev += 1
+                st.success("Mapping reutilizado. Confirme as abas e campos nas próximas etapas.")
+
+        mapping_file = st.file_uploader("Opcional · importar perfil de mapeamento (.json)", type=["json"], key="idl_mapping_upload")
+        if mapping_file is not None:
+            mh = idl.workbook_fingerprint(mapping_file.getvalue())
+            if mh != st.session_state.idl_mapping_import_hash:
+                st.session_state.idl_mapping_import_hash = mh
+                _idl_apply_mapping_profile(mapping_file.getvalue())
+
+        cprev, cnext = st.columns([1, 1], gap="small")
+        with cprev:
+            if st.button("Limpar importação", key="idl_reset_import"):
+                _idl_reset(keep_company=True)
+                st.rerun()
+        with cnext:
+            if st.button("Continuar · identificar abas →", type="primary", use_container_width=True, key="idl_to_step2"):
+                _idl_set_step(2)
+    else:
+        st.info("Carregue um arquivo Excel para iniciar. O sistema não exige que as abas ou colunas tenham os nomes do nosso modelo padrão.")
+
+
+def _idl_render_step_2():
+    if not st.session_state.idl_raw or not st.session_state.idl_profile or not st.session_state.idl_mapping:
+        st.warning("Carregue um arquivo antes de identificar as abas.")
+        if st.button("← Voltar para carregar"):
+            _idl_set_step(1)
+        return
+
+    st.markdown("### 2 · Identificar as abas")
+    st.caption("O sistema sugere o papel de cada aba. Confirme apenas onde houver dúvida. Abas informativas podem ser ignoradas.")
+    mapping = st.session_state.idl_mapping
+    options = idl.entity_options()
+    rev = st.session_state.idl_mapping_rev
+
+    for sh, info in st.session_state.idl_profile["sheets"].items():
+        current = mapping.get("sheet_map", {}).get(sh, {})
+        entity = current.get("entity")
+        current_label = idl.ENTITY_LABELS.get(entity, idl.IGNORE_ENTITY)
+        c1, c2, c3 = st.columns([1.25, 1.35, .65], gap="small")
+        with c1:
+            st.markdown(f"**{sh}**")
+            st.caption(f"{info['rows']:,} linhas · {info['cols']} colunas".replace(",", "."))
+        with c2:
+            choice = st.selectbox(
+                "Entidade",
+                options,
+                index=options.index(current_label) if current_label in options else 0,
+                key=f"idl_sheet_{rev}_{idl.safe_slug(sh)}",
+                label_visibility="collapsed",
+            )
+            chosen_entity = None if choice == idl.IGNORE_ENTITY else idl.LABEL_TO_ENTITY[choice]
+            if chosen_entity != entity:
+                mapping["sheet_map"].setdefault(sh, {})["entity"] = chosen_entity
+                mapping["sheet_map"][sh]["confidence"] = 1.0
+                mapping["sheet_map"][sh]["reason"] = "confirmado pelo usuário"
+        with c3:
+            st.caption("Confiança")
+            st.markdown(f"**{_idl_confidence_text(current.get('confidence', 0))}**")
+
+    st.session_state.idl_mapping = mapping
+    preview_sheet = st.selectbox("Prévia da aba", list(st.session_state.idl_profile["sheets"].keys()), key=f"idl_preview_sheet_{rev}")
+    st.dataframe(st.session_state.idl_profile["sheets"][preview_sheet]["preview"], use_container_width=True, hide_index=True)
+
+    cback, cnext = st.columns([1, 1], gap="small")
+    with cback:
+        if st.button("← Voltar", key="idl_step2_back"):
+            _idl_set_step(1)
+    with cnext:
+        if st.button("Continuar · fazer DE/PARA →", type="primary", use_container_width=True, key="idl_to_step3"):
+            st.session_state.idl_mapping = idl.refresh_column_mapping(st.session_state.idl_raw, st.session_state.idl_mapping)
+            st.session_state.idl_mapping_rev += 1
+            _idl_set_step(3)
+
+
+def _idl_mapping_table_for_sheet(sh, entity, df):
+    mapping = st.session_state.idl_mapping
+    rows = []
+    for col in df.columns:
+        col_s = str(col)
+        meta = mapping.get("column_map", {}).get(sh, {}).get(col_s, {})
+        field = meta.get("field")
+        unit_meta = mapping.get("unit_map", {}).get(sh, {}).get(col_s, {})
+        sample_values = df[col].dropna().astype(str).head(3).tolist()
+        rows.append({
+            "Coluna origem": col_s,
+            "Exemplo": " · ".join(sample_values)[:80],
+            "Tipo": st.session_state.idl_profile["sheets"][sh]["types"].get(col_s, "—"),
+            "Campo padrão": idl.field_display(entity, field) if field else "Não mapear",
+            "Confiança": round(float(meta.get("confidence", 0)) * 100),
+            "Unidade origem": unit_meta.get("source", idl.AUTO_UNIT),
+            "Unidade destino": unit_meta.get("target") or "—",
+        })
+    table = pd.DataFrame(rows)
+    field_display_options = ["Não mapear"] + [idl.field_display(entity, f) for f in idl.FIELD_SPECS.get(entity, {})]
+    edited = st.data_editor(
+        table,
+        use_container_width=True,
+        hide_index=True,
+        disabled=["Coluna origem", "Exemplo", "Tipo", "Confiança", "Unidade destino"],
+        column_config={
+            "Campo padrão": st.column_config.SelectboxColumn("Campo padrão", options=field_display_options, required=True),
+            "Unidade origem": st.column_config.SelectboxColumn("Unidade origem", options=idl.UNIT_OPTIONS, required=True),
+            "Confiança": st.column_config.NumberColumn("Confiança", format="%d%%"),
+        },
+        key=f"idl_colmap_{st.session_state.idl_mapping_rev}_{idl.safe_slug(sh)}",
+    )
+
+    mapped_fields = []
+    for _, row in edited.iterrows():
+        source_col = str(row["Coluna origem"])
+        field = idl.field_label_to_name(entity, str(row["Campo padrão"]))
+        field = None if field == "Não mapear" else field
+        old_field = mapping.get("column_map", {}).get(sh, {}).get(source_col, {}).get("field")
+        mapping.setdefault("column_map", {}).setdefault(sh, {}).setdefault(source_col, {})["field"] = field
+        if field != old_field:
+            mapping["column_map"][sh][source_col]["confidence"] = 1.0
+            mapping["column_map"][sh][source_col]["reason"] = "confirmado pelo usuário"
+        source_unit = str(row["Unidade origem"])
+        mapping.setdefault("unit_map", {}).setdefault(sh, {}).setdefault(source_col, {})["source"] = source_unit
+        mapping["unit_map"][sh][source_col]["target"] = idl.FIELD_SPECS.get(entity, {}).get(field, {}).get("unit") if field else None
+        if field:
+            mapped_fields.append(field)
+
+    duplicates = sorted({f for f in mapped_fields if mapped_fields.count(f) > 1})
+    if duplicates:
+        st.error("Há campos padrão usados mais de uma vez nesta aba: " + ", ".join(duplicates) + ". Mantenha apenas uma coluna de origem por campo.")
+
+    # Required-field coverage
+    required = [f for f, spec in idl.FIELD_SPECS.get(entity, {}).items() if spec.get("priority") == "required"]
+    missing = [f for f in required if f not in mapped_fields]
+    if missing:
+        st.warning("Obrigatórios ainda sem DE/PARA: " + ", ".join(idl.FIELD_SPECS[entity][f]["label"] for f in missing))
+    else:
+        st.success("Campos obrigatórios desta entidade estão mapeados.")
+
+    # Optional value-level dimension mapping
+    dim_sources = []
+    for source_col, meta in mapping.get("column_map", {}).get(sh, {}).items():
+        if meta.get("field") in idl.DIMENSION_FIELDS:
+            dim_sources.append((source_col, meta.get("field")))
+    if dim_sources:
+        with st.expander("Padronizar valores / dimensões", expanded=False):
+            st.caption("Ex.: L01, Linha-01 e Célula A podem convergir para Linha 1. Até 40 valores distintos por campo são mostrados nesta tela; os demais são preservados como vieram.")
+            for source_col, field in dim_sources:
+                if source_col not in df.columns:
+                    continue
+                values = df[source_col].dropna().astype(str).str.strip()
+                values = values[values.ne("")].drop_duplicates().head(40).tolist()
+                if not values:
+                    continue
+                current_map = mapping.setdefault("dimension_map", {}).setdefault(sh, {}).setdefault(field, {})
+                dim_df = pd.DataFrame({
+                    "Valor origem": values,
+                    "Valor padrão": [current_map.get(v, v) for v in values],
+                })
+                st.markdown(f"**{idl.FIELD_SPECS.get(entity, {}).get(field, {}).get('label', field)}**")
+                dim_edit = st.data_editor(
+                    dim_df,
+                    use_container_width=True,
+                    hide_index=True,
+                    disabled=["Valor origem"],
+                    key=f"idl_dim_{st.session_state.idl_mapping_rev}_{idl.safe_slug(sh)}_{field}",
+                )
+                for _, r in dim_edit.iterrows():
+                    current_map[str(r["Valor origem"])] = str(r["Valor padrão"]).strip() or str(r["Valor origem"])
+
+    st.session_state.idl_mapping = mapping
+    return len(duplicates) == 0
+
+
+def _idl_render_step_3():
+    if not st.session_state.idl_raw or not st.session_state.idl_mapping:
+        st.warning("Carregue e identifique as abas antes do DE/PARA.")
+        if st.button("← Voltar para carregar"):
+            _idl_set_step(1)
+        return
+
+    st.markdown("### 3 · DE/PARA e normalização")
+    st.caption("Mapeie colunas, confirme unidades e, quando necessário, padronize dimensões. O arquivo original não é alterado.")
+    raw = st.session_state.idl_raw
+    xls = pd.ExcelFile(BytesIO(raw))
+    all_ok = True
+    mapped_sheets = 0
+    for sh in xls.sheet_names:
+        entity = st.session_state.idl_mapping.get("sheet_map", {}).get(sh, {}).get("entity")
+        if not entity:
+            continue
+        mapped_sheets += 1
+        df = pd.read_excel(BytesIO(raw), sheet_name=sh)
+        with st.expander(f"{sh}  →  {idl.ENTITY_LABELS.get(entity, entity)}", expanded=mapped_sheets <= 2):
+            ok = _idl_mapping_table_for_sheet(sh, entity, df)
+            all_ok = all_ok and ok
+
+    if mapped_sheets == 0:
+        st.error("Nenhuma aba foi classificada. Volte à etapa anterior e identifique ao menos as entidades de dados.")
+        all_ok = False
+
+    cback, cnext = st.columns([1, 1], gap="small")
+    with cback:
+        if st.button("← Voltar", key="idl_step3_back"):
+            _idl_set_step(2)
+    with cnext:
+        if st.button("Continuar · validar dados →", type="primary", use_container_width=True, disabled=not all_ok, key="idl_to_step4"):
+            with st.spinner("Transformando para o Industrial Performance Data Model..."):
+                standard, lineage = idl.transform_to_standard(st.session_state.idl_raw, st.session_state.idl_mapping)
+                quality = idl.evaluate_data_quality(standard, st.session_state.idl_mapping)
+            st.session_state.idl_standard = standard
+            st.session_state.idl_lineage = lineage
+            st.session_state.idl_quality_checks = quality.checks
+            st.session_state.idl_quality_summary = quality.summary
+            _idl_set_step(4)
+
+
+def _idl_render_quality_summary(quality):
+    cols = st.columns(4, gap="small")
+    cols[0].metric("Qualidade da base", f"{quality.score:.0f}/100")
+    cols[1].metric("Status", quality.status)
+    cols[2].metric("Alertas", quality.summary.get("warnings", 0))
+    cols[3].metric("Bloqueio", "Sim" if quality.blocking else "Não")
+    if quality.blocking:
+        st.error("Existem falhas estruturais que impedem o Performance Engine de calcular o modelo com segurança.")
+    elif quality.score < 80:
+        st.warning("A base pode ser aplicada, mas há limitações relevantes. Revise os alertas antes de usar os números para decisão.")
+    else:
+        st.success("A base está apta para alimentar o Performance Engine.")
+
+
+def _idl_render_step_4():
+    if not st.session_state.idl_standard:
+        st.warning("Faça o DE/PARA antes de validar a base.")
+        if st.button("← Voltar para mapear"):
+            _idl_set_step(3)
+        return
+
+    st.markdown("### 4 · Validar qualidade dos dados")
+    quality = idl.evaluate_data_quality(st.session_state.idl_standard, st.session_state.idl_mapping)
+    st.session_state.idl_quality_checks = quality.checks
+    st.session_state.idl_quality_summary = quality.summary
+    _idl_render_quality_summary(quality)
+
+    if not quality.checks.empty:
+        view = quality.checks.copy()
+        st.dataframe(view[["Categoria", "Item", "Severidade", "Resultado", "Detalhe", "Penalidade"]], use_container_width=True, hide_index=True)
+
+    entities = list(st.session_state.idl_standard.keys())
+    if entities:
+        with st.expander("Revisar dados padronizados", expanded=False):
+            ent = st.selectbox("Entidade", entities, format_func=lambda x: idl.ENTITY_LABELS.get(x, x), key="idl_standard_preview")
+            st.dataframe(st.session_state.idl_standard[ent].head(30), use_container_width=True, hide_index=True)
+
+    cback, cnext = st.columns([1, 1], gap="small")
+    with cback:
+        if st.button("← Corrigir DE/PARA", key="idl_step4_back"):
+            _idl_set_step(3)
+    with cnext:
+        if st.button("Continuar · revisar aplicação →", type="primary", use_container_width=True, disabled=quality.blocking, key="idl_to_step5"):
+            _idl_set_step(5)
+
+
+def _idl_render_step_5():
+    if not st.session_state.idl_standard or not st.session_state.idl_mapping:
+        st.warning("Ainda não há uma base validada para aplicar.")
+        if st.button("← Voltar"):
+            _idl_set_step(4)
+        return
+
+    st.markdown("### 5 · Aplicar ao Industrial Performance")
+    quality = idl.evaluate_data_quality(st.session_state.idl_standard, st.session_state.idl_mapping)
+    if quality.blocking:
+        _idl_render_quality_summary(quality)
+        return
+
+    nrows = sum(len(df) for df in st.session_state.idl_standard.values())
+    cols = st.columns(4, gap="small")
+    cols[0].metric("Entidades", len(st.session_state.idl_standard))
+    cols[1].metric("Registros standard", f"{nrows:,}".replace(",", "."))
+    cols[2].metric("Data Quality", f"{quality.score:.0f}/100")
+    cols[3].metric("Lineage", f"{len(st.session_state.idl_lineage or [])} campos")
+
+    st.info("Ao aplicar, Cockpit, Diagnóstico e Simulador passam a consumir o modelo padronizado. A origem continua rastreável pelo lineage.")
+
+    mapping_json = idl.mapping_to_json(st.session_state.idl_mapping, st.session_state.idl_company, st.session_state.idl_source)
+    c1, c2 = st.columns(2, gap="small")
+    with c1:
+        st.download_button(
+            "Baixar perfil DE/PARA (.json)",
+            mapping_json,
+            file_name=f"mapping_{idl.safe_slug(st.session_state.idl_company)}_{idl.safe_slug(st.session_state.idl_source)}.json",
+            mime="application/json",
+            use_container_width=True,
+        )
+    with c2:
+        if st.button("Aplicar dados ao Performance Engine", type="primary", use_container_width=True, key="idl_apply_engine"):
+            record = None
+            persist_error = None
+            try:
+                record = idl.persist_ingestion(
+                    raw=st.session_state.idl_raw,
+                    filename=st.session_state.idl_filename,
+                    company=st.session_state.idl_company,
+                    source=st.session_state.idl_source,
+                    mapping=st.session_state.idl_mapping,
+                    standard=st.session_state.idl_standard,
+                    lineage=st.session_state.idl_lineage or [],
+                    quality=quality,
+                )
+            except Exception as exc:
+                persist_error = str(exc)
+            st.session_state.real_data = st.session_state.idl_standard
+            st.session_state.idl_last_record = record or {
+                "company": st.session_state.idl_company,
+                "source": st.session_state.idl_source,
+                "filename": st.session_state.idl_filename,
+                "quality_score": quality.score,
+                "quality_status": quality.status,
+                "storage_mode": "session_only",
+                "persist_error": persist_error,
+            }
+            if persist_error:
+                st.warning("Os dados foram aplicados ao Engine, mas a cópia local da camada piloto não pôde ser gravada. O cockpit continuará funcionando nesta sessão.")
+            st.session_state.page = "Cockpit Executivo"
+            st.rerun()
+
+    with st.expander("Ver lineage / rastreabilidade", expanded=False):
+        lineage_df = pd.DataFrame(st.session_state.idl_lineage or [])
+        if lineage_df.empty:
+            st.info("Nenhum lineage disponível.")
+        else:
+            st.dataframe(lineage_df, use_container_width=True, hide_index=True)
+
+    if st.button("← Voltar à validação", key="idl_step5_back"):
+        _idl_set_step(4)
+
+
+def render_data_layer_import():
+    _idl_init_state()
+    _idl_stepper()
+    step = st.session_state.idl_step
+    if step == 1:
+        _idl_render_step_1()
+    elif step == 2:
+        _idl_render_step_2()
+    elif step == 3:
+        _idl_render_step_3()
+    elif step == 4:
+        _idl_render_step_4()
+    else:
+        _idl_render_step_5()
+
+
 # ============================================================
 # SESSION STATE
 # ============================================================
@@ -1513,7 +2014,7 @@ with st.sidebar:
         ("VISÃO", ["Cockpit Executivo","Performance Operacional","Diagnóstico e Causas"]),
         ("RESULTADO", ["Finanças / DRE","Alavancas de Valor","Plano de Ação"]),
         ("INTELIGÊNCIA", ["Agente de Performance","Relatórios"]),
-        ("ADMINISTRAÇÃO", ["Configurações"]),
+        ("ADMINISTRAÇÃO", ["Central de Dados","Mapeamentos","Qualidade dos Dados","Configurações"]),
     ]
     for group, items in groups:
         st.markdown(f'<div class="menu-group">{group}</div>', unsafe_allow_html=True)
@@ -2734,41 +3235,158 @@ Prioridades:
     st.write("")
     st.download_button("Baixar resumo executivo", summary, file_name="industrial_performance_resumo.txt", type="primary")
 
-elif page == "Configurações":
-    page_header("Configurações","Importe dados, valide o modelo e atualize o cockpit.")
-    tabs = st.tabs(["Importação de Dados","Metas","Estrutura de Custos","Integrações"])
+elif page == "Central de Dados":
+    admin_header("Central de Dados", "Entrada governada: RAW → DE/PARA → Standard → Data Quality → Semantic / Gold.")
+    tabs = st.tabs(["Nova importação", "Histórico", "Arquitetura"])
 
     with tabs[0]:
-        st.markdown("#### Importar Excel")
-        st.caption("Fluxo: carregar → validar → revisar padrões de produto → aplicar ao cockpit. Para ambiente multiproduto, Padroes_Produto é obrigatório para linearizar o mix.")
-        uploaded = st.file_uploader("Arquivo Excel", type=["xlsx","xls"], accept_multiple_files=False)
-
-        if uploaded is not None:
-            data,issues = parse_excel(uploaded.getvalue())
-            if issues:
-                st.error("O arquivo foi carregado, mas ainda não está compatível com o modelo.")
-                for issue in issues:
-                    st.write("•", issue)
-            else:
-                st.success("Estrutura validada com sucesso.")
-                st.write("Abas reconhecidas:")
-                st.write(", ".join([k.title() for k in data.keys()]))
-                preview_sheet = st.selectbox("Prévia da aba", list(data.keys()))
-                st.dataframe(data[preview_sheet].head(20), use_container_width=True, hide_index=True)
-                if st.button("Aplicar dados ao cockpit", type="primary"):
-                    st.session_state.real_data = data
-                    st.session_state.page = "Cockpit Executivo"
-                    st.rerun()
-
-        if st.session_state.real_data is not None:
-            st.write("")
-            if st.button("Voltar para dados demo"):
-                st.session_state.real_data = None
-                st.rerun()
+        render_data_layer_import()
 
     with tabs[1]:
-        st.info("Próxima evolução: metas persistentes por indicador, linha e período.")
+        st.markdown("### Histórico de ingestões")
+        st.caption("No MVP v0.6.3 este histórico usa persistência local temporária. A arquitetura já está separada para migrar para Object Storage + PostgreSQL na v0.8.")
+        hist = idl.list_ingestions()
+        if hist.empty:
+            st.info("Nenhuma ingestão persistida neste ambiente ainda.")
+        else:
+            h = hist.copy()
+            keep = [c for c in ["timestamp", "company", "source", "filename", "rows", "quality_score", "quality_status", "ingestion_id"] if c in h.columns]
+            st.dataframe(h[keep].sort_values("timestamp", ascending=False), use_container_width=True, hide_index=True)
+
     with tabs[2]:
-        st.info("Próxima evolução: plano de contas gerencial + classificação fixo/variável + DE/PARA.")
+        st.markdown("### Industrial Data Layer")
+        arch = pd.DataFrame([
+            ["RAW", "Preserva o arquivo original e metadados", "Ativo no MVP"],
+            ["MAPPING", "DE/PARA de abas, colunas, dimensões e unidades", "Ativo no MVP"],
+            ["STANDARD", "Industrial Performance Data Model canônico", "Ativo no MVP"],
+            ["DATA QUALITY", "Score, bloqueios e alertas de consistência", "Ativo no MVP"],
+            ["SEMANTIC / GOLD", "Dados governados para Cockpit e Performance Engine", "Ativo no MVP"],
+            ["LINEAGE", "Origem → aba → coluna → campo padrão → transformação", "Ativo no MVP"],
+            ["OBJECT STORAGE + POSTGRESQL", "Persistência empresarial e multiempresa", "v0.8"],
+        ], columns=["Camada", "Função", "Status"])
+        st.dataframe(arch, use_container_width=True, hide_index=True)
+        st.info("O valor proprietário está no Industrial Performance Data Model e nas regras de transformação. A infraestrutura de armazenamento pode evoluir sem refazer o Performance Engine.")
+
+elif page == "Mapeamentos":
+    admin_header("Mapeamentos", "DE/PARA reutilizável por empresa e fonte de dados.")
+    _idl_init_state()
+
+    saved = idl.list_saved_mappings()
+    with st.container(border=True):
+        panel_title("Mappings salvos", "Perfis gravados no ambiente piloto")
+        if saved.empty:
+            st.info("Ainda não há mappings persistidos neste ambiente. Eles são gravados quando uma ingestão é aplicada.")
+        else:
+            st.dataframe(saved, use_container_width=True, hide_index=True)
+
+    st.write("")
+    with st.container(border=True):
+        panel_title("Mapping em uso", "Origem, campo padrão, unidade e confiança")
+        if not st.session_state.idl_mapping:
+            st.info("Nenhum mapping ativo nesta sessão. Crie uma importação na Central de Dados.")
+            if st.button("Abrir Central de Dados", type="primary", key="mapping_open_central"):
+                nav("Central de Dados")
+        else:
+            rows = []
+            for sh, cols_map in st.session_state.idl_mapping.get("column_map", {}).items():
+                entity = st.session_state.idl_mapping.get("sheet_map", {}).get(sh, {}).get("entity")
+                for source_col, meta in cols_map.items():
+                    field = meta.get("field")
+                    if not field:
+                        continue
+                    units = st.session_state.idl_mapping.get("unit_map", {}).get(sh, {}).get(source_col, {})
+                    rows.append({
+                        "Aba origem": sh,
+                        "Entidade": idl.ENTITY_LABELS.get(entity, entity),
+                        "Coluna origem": source_col,
+                        "Campo padrão": field,
+                        "Confiança": f"{float(meta.get('confidence',0))*100:.0f}%",
+                        "Unidade origem": units.get("source", "—"),
+                        "Unidade padrão": units.get("target") or "—",
+                    })
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            mapping_json = idl.mapping_to_json(st.session_state.idl_mapping, st.session_state.idl_company, st.session_state.idl_source)
+            st.download_button(
+                "Exportar perfil DE/PARA",
+                mapping_json,
+                file_name=f"mapping_{idl.safe_slug(st.session_state.idl_company)}_{idl.safe_slug(st.session_state.idl_source)}.json",
+                mime="application/json",
+            )
+
+    st.write("")
+    st.caption("Importante: no Streamlit Cloud o armazenamento local não é a persistência definitiva. Por isso o perfil pode ser exportado e, na v0.8, será armazenado em PostgreSQL/Object Storage.")
+
+elif page == "Qualidade dos Dados":
+    admin_header("Qualidade dos Dados", "Governança antes do cálculo: completude, estrutura, tipos, padrões, metas e consistência.")
+    _idl_init_state()
+
+    data_for_quality = st.session_state.idl_standard or st.session_state.real_data
+    if data_for_quality:
+        q = idl.evaluate_data_quality(data_for_quality, st.session_state.idl_mapping)
+        _idl_render_quality_summary(q)
+        if not q.checks.empty:
+            st.dataframe(q.checks[["Categoria", "Item", "Severidade", "Resultado", "Detalhe", "Penalidade"]], use_container_width=True, hide_index=True)
+
+        st.write("")
+        with st.container(border=True):
+            panel_title("Regra de governança", "O sistema não trata ausência de meta ou de padrão como ausência de problema")
+            st.markdown(
+                "**KPI sem meta é risco de gestão.** Bases multiproduto sem padrões perdem confiabilidade na leitura de produtividade. "
+                "Falhas estruturais críticas bloqueiam a aplicação; alertas não críticos reduzem o score e permanecem explícitos."
+            )
+    else:
+        st.info("Ainda não há uma base importada para avaliar. Use a Central de Dados para iniciar uma ingestão.")
+        if st.button("Abrir Central de Dados", type="primary", key="quality_open_central"):
+            nav("Central de Dados")
+
+elif page == "Configurações":
+    admin_header("Configurações", "Modelo padrão, dados ativos e evolução de integrações.")
+    tabs = st.tabs(["Modelo padrão", "Dados ativos", "Integrações", "Infraestrutura"])
+
+    with tabs[0]:
+        st.markdown("### Industrial Performance Data Model")
+        st.caption("O modelo padrão continua disponível como acelerador, mas o cliente não precisa mais adaptar seu Excel a ele: o DE/PARA faz a tradução.")
+        template = Path(__file__).parent / "Industrial_Performance_Input_Padrao_v063.xlsx"
+        if not template.exists():
+            template = Path(__file__).parent / "Industrial_Performance_Input_Padrao_v062.xlsx"
+        if template.exists():
+            st.download_button(
+                "Baixar modelo padrão de referência",
+                template.read_bytes(),
+                file_name="Industrial_Performance_Input_Padrao_v063.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                type="primary",
+            )
+        st.write("")
+        st.markdown("**Fluxo oficial v0.6.3:** RAW → Mapping / DE-PARA → Standard → Data Quality → Semantic / Gold → Performance Engine")
+
+    with tabs[1]:
+        if st.session_state.real_data is not None:
+            st.success("O Performance Engine está usando dados importados e padronizados.")
+            if st.session_state.get("idl_last_record"):
+                rec = st.session_state.idl_last_record
+                st.json({k: rec.get(k) for k in ["company", "source", "filename", "quality_score", "quality_status", "storage_mode"]})
+            if st.button("Voltar para dados demo", key="config_demo"):
+                st.session_state.real_data = None
+                st.rerun()
+        else:
+            st.info("O Performance Engine está usando dados demo.")
+        if st.button("Abrir nova importação", key="config_open_central"):
+            nav("Central de Dados")
+
+    with tabs[2]:
+        st.markdown("### Roadmap de conectores")
+        integrations = pd.DataFrame([
+            ["Excel", "Disponível", "Upload + DE/PARA"],
+            ["ERP / SQL", "v0.8", "Conector → mesmo Standard Model"],
+            ["MES", "v0.8", "Conector → mesmo Standard Model"],
+            ["WMS / CMMS", "v0.8", "Conector → mesmo Standard Model"],
+            ["APIs", "v0.8", "Ingestão programática e incremental"],
+        ], columns=["Fonte", "Status", "Estratégia"])
+        st.dataframe(integrations, use_container_width=True, hide_index=True)
+
     with tabs[3]:
-        st.info("Roadmap: ERP, MES, WMS, CMMS, SQL e APIs.")
+        st.markdown("### Persistência")
+        st.info("v0.6.3 usa DuckDB + Parquet e uma camada de abstração local para validar o produto. No Streamlit Cloud, o disco local é temporário e não deve guardar o histórico empresarial definitivo.")
+        st.markdown("**v0.8:** Object Storage (S3 / Azure Blob / R2) + PostgreSQL + engine analítico. O Industrial Performance Data Model e o Performance Engine permanecem os mesmos.")
+

@@ -1,93 +1,136 @@
-# Industrial Performance — v0.6.2.1 Hotfix
+# Industrial Performance — v0.6.3 Industrial Data Layer
 
-## Escopo desta versão
-Esta versão preserva o escopo oficial do Simulador:
-10 grupos e 26 alavancas.
+## Objetivo
+A v0.6.3 cria a camada de entrada de dados do Industrial Performance:
 
-Grupos:
-- Produção
-- Qualidade
-- Processo
-- Pessoas
-- Materiais
-- Energia
-- Logística
-- Financeiro
-- Estrutura
-- Capital
+**RAW → Mapping / DE-PARA → Standard Industrial Model → Data Quality → Semantic / Gold → Performance Engine**
 
-## Front-end
-- Grid mais rígido no Cockpit.
-- Painéis de mesma linha com alturas equivalentes.
-- Sidebar mais compacta.
-- Cards e containers com visual mais clean.
-- Tabelas com larguras controladas.
-- Diagnóstico mantém matriz Esforço x Resultado, Pareto, impacto financeiro, ações e PDF.
-- Simulador redesenhado com seleção de grupo, menos poluição visual e painel de impacto fixo ao lado.
+O cliente não precisa mais renomear manualmente abas e colunas para aderir ao modelo H2M.
 
-## Simulador
-- 26 alavancas acordadas.
-- OEE direto ou Drivers de OEE.
-- Setup, paradas e MTTR alimentam disponibilidade sem dupla contagem.
-- Produtividade permanece no escopo, mas o consolidado deve ser linearizado pelo mix.
-- Capacidade habilita valor; volume vendido monetiza capacidade.
-- OTIF trabalha como receita protegida, não receita automática.
-- Custo fixo e contratos/serviços são separados para evitar dupla contagem.
-- Capital de giro fica separado do EBITDA.
-- Mapa de Valor diferencia "Valor habilitado", EBITDA e Caixa.
-- Cenário pode ser transformado em Plano de Captura.
+## O que foi implementado
 
-## Planilha padrão
-Use:
-Industrial_Performance_Input_Padrao_v062.xlsx
+### Central de Dados
+Fluxo guiado em 5 etapas:
+1. Carregar
+2. Identificar
+3. Mapear
+4. Validar
+5. Aplicar
 
-Novas abas:
-- Alavancas_Simulador
-- Premissas_Simulador
+### Reconhecimento automático
+- Identificação de abas por nome e estrutura das colunas.
+- Sugestão de entidade: Produção, Qualidade, Manutenção, Pessoas, Custos, Metas, Padrões etc.
+- Confiança do reconhecimento para orientar o que precisa ser confirmado.
 
-A planilha registra o escopo oficial, dependências, confiança e premissas do motor.
+### DE/PARA visual
+- Coluna do cliente → campo canônico H2M.
+- Campos obrigatórios, recomendados e opcionais.
+- Detecção de tipo de dado.
+- Confiança por mapeamento.
+- Bloqueio de duplicidade de destino na mesma aba.
 
-## GitHub
-Substitua na raiz:
-- app.py
-- requirements.txt
-- README.md
+### Unidades
+- Detecção e conversão de minutos ↔ horas.
+- kg ↔ toneladas.
+- R$ mil → R$.
+- % ↔ decimal quando aplicável.
+- Unidade original e unidade padrão ficam registradas no lineage.
 
-Mantenha:
-- logo_h2m_white.jpeg
-- logo_h2m_blue.jpeg
+### Dimensões
+Padronização opcional de valores como:
+- fábrica;
+- linha;
+- máquina;
+- produto;
+- turno;
+- causa;
+- tipo de parada.
 
-Opcionalmente suba também:
-- Industrial_Performance_Input_Padrao_v062.xlsx
+Exemplo: `L01`, `Linha-01` e `Célula A` podem convergir para `Linha 1`.
 
-Main file path:
-app.py
+### Industrial Performance Data Model
+Os dados são transformados para entidades canônicas usadas pelo produto:
+- producao
+- qualidade
+- manutencao
+- pessoas
+- custos
+- metas
+- padroes_produto
+- parametros_diagnostico
+- responsaveis
+- alavancas_simulador
+- premissas_simulador
 
+### Data Quality
+Score de 0 a 100 com verificações de:
+- entidades e campos obrigatórios;
+- completude;
+- duplicidade;
+- tipos de dados;
+- metas;
+- padrões de produto;
+- mix multiproduto;
+- confiança do mapping.
 
-## Hotfix v0.6.2.1
-- Corrigido NameError no carregamento do app.
-- Causa: regras CSS da v0.6.1/v0.6.2 estavam com chaves simples dentro de um f-string do Python.
-- Todas as chaves CSS foram escapadas corretamente.
-- Escopo funcional permanece igual: 10 grupos e 26 alavancas.
-- Nenhuma regra de negócio do simulador foi removida.
+Falhas estruturais críticas bloqueiam a aplicação ao Performance Engine. Alertas não críticos permanecem explícitos e reduzem o score.
 
+### Mapping reutilizável
+- Mapping salvo por empresa + fonte no ambiente piloto.
+- Exportação do DE/PARA em JSON.
+- Importação de perfil JSON para reaplicar o mapping em outro upload.
 
-## Hotfix v0.6.2.2
-- Menu lateral totalmente alinhado à esquerda.
-- Texto e conteúdo interno dos botões agora usam justify-content:flex-start e text-align:left.
-- Mantido o destaque azul/cyan do item ativo.
+### RAW + Standard + Lineage
+Quando a ingestão é aplicada, a camada piloto tenta registrar:
+- arquivo RAW original;
+- tabelas Standard em Parquet;
+- mapping JSON;
+- metadata de ingestão;
+- lineage origem → aba → coluna → campo padrão → transformação.
 
+O armazenamento analítico usa **DuckDB + Parquet**.
 
-## Hotfix v0.6.2.3
-- Corrigido NameError da linha `width:100%` no CSS do menu lateral.
-- Todas as chaves do CSS do hotfix da sidebar foram escapadas corretamente para uso dentro do f-string.
-- Auditoria do bloco de tema confirmou que as únicas expressões f-string restantes são as variáveis de tema esperadas.
-- Mantido o menu alinhado à esquerda.
+## Novas páginas
+Na seção Administração:
+- Central de Dados
+- Mapeamentos
+- Qualidade dos Dados
+- Configurações
 
+## Importante sobre Streamlit Cloud
+Na v0.6.3, a persistência local serve para validar a arquitetura e o produto. O disco local do Streamlit Cloud não deve ser considerado armazenamento empresarial definitivo.
 
-## v0.6.2.4 — Logo H2M
-- Logo H2M trocado por versão branca com fundo transparente.
-- Removido o bloco branco visual do logo na sidebar.
-- Logo agora é clicável.
-- Clique abre https://h2mconsulting.com.br em nova aba.
-- Menu lateral permanece alinhado à esquerda.
+Na v0.8, a persistência pode migrar para:
+- Object Storage (S3 / Azure Blob / Cloudflare R2)
+- PostgreSQL
+- DuckDB / camada analítica
+
+O Industrial Performance Data Model e o Performance Engine permanecem os mesmos.
+
+## Compatibilidade funcional preservada
+A v0.6.3 mantém:
+- Cockpit Executivo;
+- Diagnóstico e Causas;
+- saúde operacional/financeira ponderada;
+- produtividade linearizada por HH padrão em ambiente multiproduto;
+- PDF executivo;
+- Plano de Ação com responsável e e-mail;
+- Simulador oficial com 10 grupos e 26 alavancas;
+- regras de não dupla contagem entre causa e efeito;
+- logo H2M transparente e clicável.
+
+Também foi corrigido um problema no processamento de dados reais em Manutenção: a coluna canônica `causa` agora é corretamente apresentada ao motor como `Causa` no Pareto e no diagnóstico.
+
+## Arquivos para o GitHub
+Suba/substitua na raiz do repositório:
+- `app.py`
+- `industrial_data_layer.py`
+- `requirements.txt`
+- `README.md`
+- `logo_h2m_transparent.png`
+- `logo_h2m_white.jpeg`
+- `logo_h2m_blue.jpeg`
+- `Industrial_Performance_Input_Padrao_v063.xlsx`
+
+Arquivo principal do Streamlit:
+`app.py`
