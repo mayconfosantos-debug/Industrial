@@ -1,4 +1,4 @@
-# Industrial Performance — v0.6.4.1 Analytics Hotfix
+# Industrial Performance — v0.6.4.4 Simulator Drivers Hotfix
 
 ## Objetivo
 A v0.6.3 cria a camada de entrada de dados do Industrial Performance:
@@ -239,3 +239,46 @@ Testes executados:
 - Produto sem granularidade em Pessoas/Manutenção.
 - Período parcial.
 - Combinação Linha × Produto sem registros.
+
+## v0.6.4.2 — Hotfix Drill-down / Performance Filters
+
+- O drill-down de Performance roda em `st.fragment`, evitando rerun completo da página a cada seleção local.
+- Seleção de Máquina agora filtra também a tabela de Máquinas; antes ela apenas alimentava o nível Causa.
+- Seleção de Causa agora filtra também a tabela de Causas; antes o breadcrumb mudava, mas o Pareto permanecia completo.
+- Filtros dependentes agora são em cascata:
+  - mudança de KPI limpa Máquina e Causa;
+  - mudança de Linha limpa Máquina e Causa;
+  - mudança de Máquina limpa Causa.
+- Estado de widgets é validado novamente quando filtros globais mudam, evitando seleção antiga/inválida.
+- O drill-down de Horas Extras e Custo Industrial/Unidade também respeita a Linha selecionada localmente.
+
+Validação esperada do exemplo:
+`OEE → MX-04 → Falha mecânica` deve mostrar apenas `MX-04` na tabela de Máquinas e apenas `Falha mecânica` na tabela de Causas.
+
+## v0.6.4.3 — Hotfix dos filtros globais
+
+- Grupo / Planta / Linha / Produto agora são reconstruídos diretamente da entidade canônica `producao` em cada renderização da página.
+- Adicionado fallback direto sobre as colunas do Standard Model para evitar opções vazias por cache/session state antigo.
+- Separados **filtros em edição** (`af_ui_*`) dos **filtros aplicados** (`af_*`).
+- Os filtros globais agora ficam em um formulário: o usuário seleciona todos os campos e clica **Aplicar filtros** uma única vez. Isso evita recalcular Cockpit, DRE, Diagnóstico e Performance Engine a cada clique.
+- Período continua inicializado automaticamente com a menor e maior data da base.
+- A interface mostra a quantidade de opções detectadas (grupos, plantas, linhas e produtos) para facilitar QA.
+- Se alguma dimensão realmente não existir no Standard Model, o app mostra um aviso para revisar o DE/PARA em vez de deixar o problema silencioso.
+
+Teste de regressão com a base padrão:
+- 1 Grupo: Grupo Industrial S.A.
+- 1 Planta: Planta São Paulo
+- 4 Linhas: Linha 1–4
+- 4 Produtos: A–D
+- seleção Grupo + Planta + Linha 3 + Produto C aplicada corretamente, com 31 registros de Produção no recorte.
+
+## v0.6.4.4 — Simulador de Produção por Drivers
+
+- Removido o seletor `OEE direto` × `Drivers de OEE`.
+- Existe um único motor de produção: OEE é resultado calculado.
+- OEE projetado = Disponibilidade × Performance × Qualidade, com Qualidade ajustada pela meta de Refugo.
+- Disponibilidade, Performance e Capacidade recebem valores-meta absolutos; o sistema calcula o Δ em pontos percentuais.
+- Setup, Paradas não planejadas e MTTR continuam atuando na Disponibilidade, sem criar um segundo caminho de OEE.
+- O simulador agora abre neutro (`Meta = Atual`) e descarta estados antigos da sessão, evitando metas obsoletas como 33%, 20% ou 1%.
+- `Cenário exemplo` aplica melhorias relativas ao baseline atual, nunca metas fixas inferiores ao desempenho corrente.
+- OEE permanece no modelo como KPI/resultado e pode ser comparado à meta corporativa, mas não é uma alavanca editável.

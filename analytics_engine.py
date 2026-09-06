@@ -9,7 +9,7 @@ import re
 import numpy as np
 import pandas as pd
 
-ANALYTICS_VERSION = "0.6.4.1"
+ANALYTICS_VERSION = "0.6.4.4"
 
 DIMENSION_ALIASES = {
     "grupo": ["grupo", "grupo_empresa", "grupo_industrial", "business_group"],

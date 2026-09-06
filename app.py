@@ -1662,7 +1662,7 @@ def simulator_baselines(D):
     }
 
 
-def calculate_simulator_scenario(D, targets, prod_mode="OEE direto"):
+def calculate_simulator_scenario(D, targets, prod_mode=None):
     """
     Motor determinístico do simulador.
     A entrada é sempre valor atual -> valor meta.
@@ -1703,15 +1703,15 @@ def calculate_simulator_scenario(D, targets, prod_mode="OEE direto"):
     process_recovery=downtime_share*(0.25*setup_improvement+0.45*unplanned_improvement+0.30*mttr_improvement)
     derived_availability=float(np.clip(base_avail+process_recovery,0.01,0.99))
 
-    if prod_mode=="OEE direto":
-        effective_oee=float(np.clip(targets["oee"]/100,0.01,0.99))
-        effective_availability=base_avail
-        effective_performance=base_perf
-    else:
-        manual_availability=float(np.clip(targets["availability"]/100,0.01,0.99))
-        effective_availability=max(manual_availability,derived_availability)
-        effective_performance=float(np.clip(targets["performance"]/100,0.01,1.05))
-        effective_oee=float(np.clip(effective_availability*min(effective_performance,1.0)*base_quality,0.01,0.99))
+    # OEE é sempre resultado dos drivers — não existe mais seletor OEE direto x Drivers.
+    manual_availability=float(np.clip(targets["availability"]/100,0.01,0.99))
+    effective_availability=max(manual_availability,derived_availability)
+    effective_performance=float(np.clip(targets["performance"]/100,0.01,1.05))
+    base_scrap_ratio=float(B["scrap"])/100
+    target_scrap_ratio=float(targets["scrap"])/100
+    quality_ratio=(1-target_scrap_ratio)/max(1-base_scrap_ratio,0.001)
+    effective_quality=float(np.clip(base_quality*quality_ratio,0.01,1.0))
+    effective_oee=float(np.clip(effective_availability*min(effective_performance,1.0)*effective_quality,0.01,0.99))
 
     capacity_ratio=max(0.01,targets["capacity"]/max(B["capacity"],0.01))
     performance_capacity_ratio=max(0.01,effective_oee/base_oee)*capacity_ratio
@@ -1857,13 +1857,10 @@ def calculate_simulator_scenario(D, targets, prod_mode="OEE direto"):
     }
     bridge={k:float(v) for k,v in bridge.items() if abs(float(v))>0.5}
 
-    # ---------- Value map: 26 alavancas ----------
+    # ---------- Value map: drivers de produção ----------
     enable_weights={}
-    if prod_mode=="OEE direto":
-        enable_weights["OEE"]=abs(float(targets["oee"])-B["oee"])/max(B["oee"],1)
-    else:
-        enable_weights["Disponibilidade"]=abs(float(targets["availability"])-B["availability"])/max(B["availability"],1)
-        enable_weights["Performance"]=abs(float(targets["performance"])-B["performance"])/max(B["performance"],1)
+    enable_weights["Disponibilidade"]=abs(float(targets["availability"])-B["availability"])/max(B["availability"],1)
+    enable_weights["Performance"]=abs(float(targets["performance"])-B["performance"])/max(B["performance"],1)
     enable_weights["Capacidade utilizada"]=abs(float(targets["capacity"])-B["capacity"])/max(B["capacity"],1)
     enable_weights["Setup médio"]=abs(float(targets["setup"])-B["setup"])/max(B["setup"],1)
     enable_weights["Paradas não planejadas"]=abs(float(targets["unplanned_hours"])-B["unplanned_hours"])/max(B["unplanned_hours"],1) if B["unplanned_hours"] else 0
@@ -1936,6 +1933,7 @@ def calculate_simulator_scenario(D, targets, prod_mode="OEE direto"):
         "effective_oee":effective_oee,
         "effective_availability":effective_availability,
         "effective_performance":effective_performance,
+        "effective_quality":effective_quality,
         "simulated_revenue":simulated_revenue,
         "revenue_gain":revenue_gain,
         "simulated_ebitda":simulated_ebitda,
@@ -2022,32 +2020,101 @@ def nav(page):
     st.rerun()
 
 
+def _analytics_live_filter_options(data):
+    """Resolve filter choices directly from the active Standard Model.
+
+    Do not rely only on a cached options object: after an upload/deploy, Streamlit
+    session state can survive while the imported model changes. This helper rebuilds
+    Grupo / Planta / Linha / Produto / Período from Produção on every page render.
+    """
+    opts=ae.filter_options(data) if data else {
+        "grupo":[],"planta":[],"linha":[],"produto":[],"date_min":None,"date_max":None
+    }
+    opts={
+        "grupo":list(opts.get("grupo",[]) or []),
+        "planta":list(opts.get("planta",[]) or []),
+        "linha":list(opts.get("linha",[]) or []),
+        "produto":list(opts.get("produto",[]) or []),
+        "date_min":opts.get("date_min"),
+        "date_max":opts.get("date_max"),
+    }
+
+    # Hard fallback from the canonical Produção entity. This makes the UI resilient
+    # even if a stale analytics module/cache returns dates but misses dimensions.
+    prod=data.get("producao") if isinstance(data,dict) else None
+    if isinstance(prod,pd.DataFrame) and not prod.empty:
+        by_norm={norm(c):c for c in prod.columns}
+        aliases={
+            "grupo":["grupo","grupo_empresa","grupo_industrial"],
+            "planta":["fabrica","planta","site","unidade_fabril"],
+            "linha":["linha","line","centro_trabalho","workcenter"],
+            "produto":["produto","sku","product","material","item"],
+        }
+        for dim,candidates in aliases.items():
+            if not opts[dim]:
+                col=next((by_norm.get(norm(c)) for c in candidates if by_norm.get(norm(c))),None)
+                if col:
+                    vals=prod[col].dropna().astype(str).str.strip()
+                    opts[dim]=sorted(
+                        {v for v in vals if v and v.lower() not in {"nan","none","<na>"}},
+                        key=norm
+                    )
+        if opts["date_min"] is None or opts["date_max"] is None:
+            dcol=next((by_norm.get(norm(c)) for c in ["data","date","competencia","periodo"] if by_norm.get(norm(c))),None)
+            if dcol:
+                ds=pd.to_datetime(prod[dcol],errors="coerce").dropna()
+                if not ds.empty:
+                    opts["date_min"]=ds.min().normalize()
+                    opts["date_max"]=ds.max().normalize()
+    return opts
+
+
 def _analytics_prepare_state(data):
-    opts=ae.filter_options(data)
+    opts=_analytics_live_filter_options(data)
     signature=(
         tuple(opts.get("grupo",[])),tuple(opts.get("planta",[])),
         tuple(opts.get("linha",[])),tuple(opts.get("produto",[])),
         str(opts.get("date_min")),str(opts.get("date_max"))
     )
-    if st.session_state.get("af_dataset_signature") != signature:
+    changed=st.session_state.get("af_dataset_signature") != signature
+    if changed:
         st.session_state.af_dataset_signature=signature
-        st.session_state.af_group="Todos"
-        st.session_state.af_plant="Todas"
-        st.session_state.af_line="Todas"
-        st.session_state.af_product="Todos"
+        for key,value in {
+            "af_group":"Todos","af_plant":"Todas","af_line":"Todas","af_product":"Todos",
+            "af_ui_group":"Todos","af_ui_plant":"Todas","af_ui_line":"Todas","af_ui_product":"Todos",
+        }.items():
+            st.session_state[key]=value
         st.session_state.pop("analytics_last_valid_data",None)
         st.session_state.pop("analytics_last_valid_D",None)
         if opts.get("date_min") is not None and opts.get("date_max") is not None:
-            st.session_state.af_period=(opts["date_min"].date(),opts["date_max"].date())
+            period=(opts["date_min"].date(),opts["date_max"].date())
+            st.session_state.af_period=period
+            st.session_state.af_ui_period=period
         else:
             st.session_state.af_period=()
+            st.session_state.af_ui_period=()
 
-    # The date-range widget must never start blank when the imported dataset has dates.
+    allowed={
+        "af_group":["Todos"]+opts["grupo"],"af_ui_group":["Todos"]+opts["grupo"],
+        "af_plant":["Todas"]+opts["planta"],"af_ui_plant":["Todas"]+opts["planta"],
+        "af_line":["Todas"]+opts["linha"],"af_ui_line":["Todas"]+opts["linha"],
+        "af_product":["Todos"]+opts["produto"],"af_ui_product":["Todos"]+opts["produto"],
+    }
+    defaults={
+        "af_group":"Todos","af_ui_group":"Todos","af_plant":"Todas","af_ui_plant":"Todas",
+        "af_line":"Todas","af_ui_line":"Todas","af_product":"Todos","af_ui_product":"Todos"
+    }
+    for key,options in allowed.items():
+        if st.session_state.get(key,defaults[key]) not in options:
+            st.session_state[key]=defaults[key]
+
     if opts.get("date_min") is not None and opts.get("date_max") is not None:
-        period=st.session_state.get("af_period")
-        valid_period=isinstance(period,(tuple,list)) and len(period)>=2 and period[0] is not None and period[1] is not None
-        if not valid_period:
-            st.session_state.af_period=(opts["date_min"].date(),opts["date_max"].date())
+        full_period=(opts["date_min"].date(),opts["date_max"].date())
+        for key in ["af_period","af_ui_period"]:
+            period=st.session_state.get(key)
+            valid=isinstance(period,(tuple,list)) and len(period)>=2 and period[0] is not None and period[1] is not None
+            if not valid:
+                st.session_state[key]=full_period
 
     st.session_state.analytics_filter_options=opts
     return opts
@@ -2069,50 +2136,99 @@ def _analytics_filters_from_state():
     }
 
 
+def _apply_global_filter_draft():
+    """Commit form values only when the user clicks Aplicar filtros."""
+    st.session_state.af_group=st.session_state.get("af_ui_group","Todos")
+    st.session_state.af_plant=st.session_state.get("af_ui_plant","Todas")
+    st.session_state.af_line=st.session_state.get("af_ui_line","Todas")
+    st.session_state.af_product=st.session_state.get("af_ui_product","Todos")
+    st.session_state.af_period=st.session_state.get("af_ui_period",st.session_state.get("af_period",()))
+    st.session_state.pop("analytics_last_valid_data",None)
+    st.session_state.pop("analytics_last_valid_D",None)
+
+
 def page_header(title, subtitle):
-    opts=st.session_state.get("analytics_filter_options",{})
     has_real=bool(st.session_state.get("real_data"))
     if has_real:
-        groups=["Todos"]+list(opts.get("grupo",[]))
-        plants=["Todas"]+list(opts.get("planta",[]))
-        lines=["Todas"]+list(opts.get("linha",[]))
-        products=["Todos"]+list(opts.get("produto",[]))
+        # Rebuild choices from real_data NOW. Do not trust stale cached options.
+        opts=_analytics_live_filter_options(st.session_state.real_data)
+        st.session_state.analytics_filter_options=opts
 
-        c1,c2,c3,c4,c5,c6=st.columns([.86,.92,.86,.92,1.28,.88],gap="small")
-        with c1:
-            st.selectbox("Grupo",groups,key="af_group",label_visibility="collapsed")
-        with c2:
-            st.selectbox("Planta",plants,key="af_plant",label_visibility="collapsed")
-        with c3:
-            st.selectbox("Linha",lines,key="af_line",label_visibility="collapsed")
-        with c4:
-            st.selectbox("Produto",products,key="af_product",label_visibility="collapsed")
-        with c5:
-            dmin=opts.get("date_min")
-            dmax=opts.get("date_max")
-            if dmin is not None and dmax is not None:
-                period=st.session_state.get("af_period")
-                valid_period=isinstance(period,(tuple,list)) and len(period)>=2 and period[0] is not None and period[1] is not None
-                if not valid_period:
-                    st.session_state.af_period=(dmin.date(),dmax.date())
-                st.date_input(
-                    "Período",key="af_period",
-                    min_value=dmin.date(),max_value=dmax.date(),
-                    label_visibility="collapsed"
-                )
-            else:
-                st.caption("Período não disponível")
-        with c6:
-            current_filters=_analytics_filters_from_state()
-            non_period_active=any(current_filters.get(k) not in (None,"","Todos","Todas") for k in ["grupo","planta","linha","produto"])
-            period_restricted=False
-            if dmin is not None and dmax is not None and current_filters.get("start") is not None and current_filters.get("end") is not None:
-                period_restricted=(
-                    pd.Timestamp(current_filters["start"]).date()!=dmin.date()
-                    or pd.Timestamp(current_filters["end"]).date()!=dmax.date()
-                )
-            badge="Dados filtrados" if (non_period_active or period_restricted) else "Dados importados"
-            st.markdown(f'<div style="text-align:right;padding-top:.2rem"><span class="data-badge">{badge}</span></div>',unsafe_allow_html=True)
+        groups=["Todos"]+opts["grupo"]
+        plants=["Todas"]+opts["planta"]
+        lines=["Todas"]+opts["linha"]
+        products=["Todos"]+opts["produto"]
+        dmin=opts.get("date_min")
+        dmax=opts.get("date_max")
+
+        # Defensive state repair before creating widgets.
+        repair={
+            "af_ui_group":(groups,"Todos"),"af_ui_plant":(plants,"Todas"),
+            "af_ui_line":(lines,"Todas"),"af_ui_product":(products,"Todos")
+        }
+        for key,(options,default) in repair.items():
+            if st.session_state.get(key,default) not in options:
+                st.session_state[key]=default
+        if dmin is not None and dmax is not None:
+            full_period=(dmin.date(),dmax.date())
+            period=st.session_state.get("af_ui_period")
+            valid=isinstance(period,(tuple,list)) and len(period)>=2 and period[0] is not None and period[1] is not None
+            if not valid:
+                st.session_state.af_ui_period=full_period
+
+        # A form avoids a full Performance Engine rerun for every dropdown click.
+        # User chooses all filters first and recalculates the application once.
+        form_key="global_filters_form"
+        with st.form(form_key,border=False):
+            c1,c2,c3,c4,c5,c6=st.columns([.86,.92,.86,.92,1.28,.76],gap="small")
+            with c1:
+                st.selectbox("Grupo",groups,key="af_ui_group",label_visibility="collapsed")
+            with c2:
+                st.selectbox("Planta",plants,key="af_ui_plant",label_visibility="collapsed")
+            with c3:
+                st.selectbox("Linha",lines,key="af_ui_line",label_visibility="collapsed")
+            with c4:
+                st.selectbox("Produto",products,key="af_ui_product",label_visibility="collapsed")
+            with c5:
+                if dmin is not None and dmax is not None:
+                    st.date_input(
+                        "Período",key="af_ui_period",
+                        min_value=dmin.date(),max_value=dmax.date(),
+                        label_visibility="collapsed"
+                    )
+                else:
+                    st.caption("Período não disponível")
+            with c6:
+                submitted=st.form_submit_button("Aplicar filtros",type="primary",use_container_width=True)
+
+        if submitted:
+            _apply_global_filter_draft()
+            st.rerun()
+
+        # QA guard: if dimensions are unexpectedly absent, show it instead of silently
+        # rendering four selectors that contain only Todos/Todas.
+        missing=[label for key,label in [("grupo","Grupo"),("planta","Planta"),("linha","Linha"),("produto","Produto")] if not opts.get(key)]
+        if missing:
+            st.warning(
+                "Filtros sem dimensão na base padronizada: " + ", ".join(missing) + ". "
+                "Revise o DE/PARA dessas colunas na Central de Dados."
+            )
+
+        current_filters=_analytics_filters_from_state()
+        non_period_active=any(current_filters.get(k) not in (None,"","Todos","Todas") for k in ["grupo","planta","linha","produto"])
+        period_restricted=False
+        if dmin is not None and dmax is not None and current_filters.get("start") is not None and current_filters.get("end") is not None:
+            period_restricted=(
+                pd.Timestamp(current_filters["start"]).date()!=dmin.date()
+                or pd.Timestamp(current_filters["end"]).date()!=dmax.date()
+            )
+        badge="Dados filtrados" if (non_period_active or period_restricted) else "Dados importados"
+        counts=f"{len(opts['grupo'])} grupo · {len(opts['planta'])} planta · {len(opts['linha'])} linhas · {len(opts['produto'])} produtos"
+        st.markdown(
+            f'<div style="display:flex;justify-content:flex-end;gap:.5rem;align-items:center;margin-top:-.25rem">'
+            f'<span style="font-size:.72rem;color:#6E7C90">{counts}</span>'
+            f'<span class="data-badge">{badge}</span></div>',unsafe_allow_html=True
+        )
     else:
         c1,c2,c3,c4,c5=st.columns([1,1,1,1,1.35],gap="small")
         c1.selectbox("Grupo",["Grupo Industrial S.A."],disabled=True,label_visibility="collapsed",key=f"demo_g_{title}")
@@ -2133,7 +2249,7 @@ def page_header(title, subtitle):
 
 
 def admin_header(title, subtitle):
-    st.markdown('<div class="eyebrow">INDUSTRIAL DATA + ANALYTICS · v0.6.4.1</div>', unsafe_allow_html=True)
+    st.markdown('<div class="eyebrow">INDUSTRIAL DATA + ANALYTICS · v0.6.4.4</div>', unsafe_allow_html=True)
     st.markdown(f'<div class="page-title">{title}</div>', unsafe_allow_html=True)
     st.markdown(f'<div class="page-subtitle">{subtitle}</div>', unsafe_allow_html=True)
 
@@ -2934,132 +3050,180 @@ elif page == "Performance Operacional":
                 st.info("Sem dados para o gráfico no recorte.")
 
     st.write("")
-    with st.container(border=True):
-        panel_title("Drill-down de Performance","KPI → Linha → Máquina → Causa, preservando o recorte dos filtros globais")
 
-        kpi_options=["OEE","Disponibilidade","Produção","Refugo","Horas extras","Custo industrial/unidade"]
-        line_options=["Todas"] + (lp["Linha"].astype(str).tolist() if not lp.empty else [])
-        c1,c2,c3,c4=st.columns([.9,1,1,1.1],gap="small")
+    @st.fragment
+    def render_performance_drilldown():
+        """Local drill-down fragment: downstream selections no longer rerun the whole page."""
+        with st.container(border=True):
+            panel_title("Drill-down de Performance","KPI → Linha → Máquina → Causa, preservando o recorte dos filtros globais")
 
-        with c1:
-            drill_kpi=st.selectbox("KPI",kpi_options,key="an_drill_kpi")
-        with c2:
-            drill_line=st.selectbox("Linha",line_options,key="an_drill_line")
-        selected_line=None if drill_line=="Todas" else drill_line
+            kpi_options=["OEE","Disponibilidade","Produção","Refugo","Horas extras","Custo industrial/unidade"]
+            line_options=["Todas"] + (lp["Linha"].astype(str).tolist() if not lp.empty else [])
 
-        machine_df=ae.machine_drilldown(ACTIVE_DATA,D,selected_line)
-        machine_options=["Todas"] + (machine_df["Máquina"].astype(str).tolist() if not machine_df.empty else [])
-        with c3:
-            selected_machine_ui=st.selectbox(
-                "Máquina",
-                machine_options if drill_kpi in ["OEE","Disponibilidade","Produção"] else ["N/A"],
-                key="an_drill_machine",
-                disabled=drill_kpi not in ["OEE","Disponibilidade","Produção"]
+            # Keep widget state valid after global-filter changes.
+            if st.session_state.get("an_drill_kpi") not in kpi_options:
+                st.session_state.an_drill_kpi="OEE"
+            if st.session_state.get("an_drill_line") not in line_options:
+                st.session_state.an_drill_line="Todas"
+
+            def _reset_after_kpi():
+                st.session_state.an_drill_machine="Todas"
+                st.session_state.an_drill_cause="Todas"
+
+            def _reset_after_line():
+                st.session_state.an_drill_machine="Todas"
+                st.session_state.an_drill_cause="Todas"
+
+            def _reset_after_machine():
+                st.session_state.an_drill_cause="Todas"
+
+            c1,c2,c3,c4=st.columns([.9,1,1,1.1],gap="small")
+            with c1:
+                drill_kpi=st.selectbox(
+                    "KPI",kpi_options,key="an_drill_kpi",on_change=_reset_after_kpi
+                )
+            with c2:
+                drill_line=st.selectbox(
+                    "Linha",line_options,key="an_drill_line",on_change=_reset_after_line
+                )
+            selected_line=None if drill_line=="Todas" else drill_line
+
+            machine_enabled=drill_kpi in ["OEE","Disponibilidade","Produção"]
+            machine_df=ae.machine_drilldown(ACTIVE_DATA,D,selected_line) if machine_enabled else pd.DataFrame()
+            machine_options=["Todas"] + (machine_df["Máquina"].astype(str).tolist() if not machine_df.empty else [])
+            if not machine_enabled:
+                machine_options=["N/A"]
+            if st.session_state.get("an_drill_machine") not in machine_options:
+                st.session_state.an_drill_machine=machine_options[0]
+
+            with c3:
+                selected_machine_ui=st.selectbox(
+                    "Máquina",machine_options,key="an_drill_machine",
+                    disabled=not machine_enabled,on_change=_reset_after_machine
+                )
+            selected_machine=None if selected_machine_ui in ["Todas","N/A"] else selected_machine_ui
+
+            cause_df=ae.cause_drilldown(ACTIVE_DATA,D,selected_line,selected_machine) if machine_enabled else pd.DataFrame()
+            cause_options=["Todas"] + (cause_df["Causa"].astype(str).tolist() if not cause_df.empty else [])
+            if not machine_enabled:
+                cause_options=["N/A"]
+            if st.session_state.get("an_drill_cause") not in cause_options:
+                st.session_state.an_drill_cause=cause_options[0]
+
+            with c4:
+                selected_cause_ui=st.selectbox(
+                    "Causa",cause_options,key="an_drill_cause",disabled=not machine_enabled
+                )
+            selected_cause=None if selected_cause_ui in ["Todas","N/A"] else selected_cause_ui
+
+            breadcrumb=[drill_kpi]
+            if selected_line:
+                breadcrumb.append(selected_line)
+            if selected_machine:
+                breadcrumb.append(selected_machine)
+            if selected_cause:
+                breadcrumb.append(selected_cause)
+            st.markdown(
+                "<div class='frontend-note'><b>Drill-down:</b> " + " → ".join(breadcrumb) + "</div>",
+                unsafe_allow_html=True
             )
-        selected_machine=None if selected_machine_ui in ["Todas","N/A"] else selected_machine_ui
 
-        cause_df=ae.cause_drilldown(ACTIVE_DATA,D,selected_line,selected_machine)
-        cause_options=["Todas"] + (cause_df["Causa"].astype(str).tolist() if not cause_df.empty else [])
-        with c4:
-            selected_cause_ui=st.selectbox(
-                "Causa",
-                cause_options if drill_kpi in ["OEE","Disponibilidade","Produção"] else ["N/A"],
-                key="an_drill_cause",
-                disabled=drill_kpi not in ["OEE","Disponibilidade","Produção"]
-            )
-        selected_cause=None if selected_cause_ui in ["Todas","N/A"] else selected_cause_ui
+            st.write("")
+            if machine_enabled:
+                # A selection must also filter the table that the user is looking at.
+                # Previously the Machine/Cause dropdowns only fed the next level, so the
+                # breadcrumb changed but the current table still showed every row.
+                machine_view=machine_df.copy()
+                if selected_machine and not machine_view.empty:
+                    machine_view=machine_view[machine_view["Máquina"].astype(str)==str(selected_machine)].copy()
 
-        breadcrumb=[drill_kpi]
-        if selected_line:
-            breadcrumb.append(selected_line)
-        if selected_machine:
-            breadcrumb.append(selected_machine)
-        if selected_cause:
-            breadcrumb.append(selected_cause)
-        st.markdown(
-            "<div class='frontend-note'><b>Drill-down:</b> " + " → ".join(breadcrumb) + "</div>",
-            unsafe_allow_html=True
-        )
+                cause_view=cause_df.copy()
+                if selected_cause and not cause_view.empty:
+                    cause_view=cause_view[cause_view["Causa"].astype(str)==str(selected_cause)].copy()
 
-        st.write("")
-        if drill_kpi in ["OEE","Disponibilidade","Produção"]:
-            a,b=st.columns([1,.95],gap="small")
-            with a:
-                panel_title("Máquinas — perda de disponibilidade","Horas de parada, eventos, MTTR e impacto estimado")
-                if machine_df.empty:
-                    st.info("A base não possui máquina + manutenção suficientes para este recorte.")
-                else:
-                    show_machine=machine_df.copy()
-                    show_machine["Paradas h"]=show_machine["Paradas h"].round(1)
-                    show_machine["MTTR min"]=show_machine["MTTR min"].round(0)
-                    show_machine["Impacto"]=show_machine["Impacto R$"].map(lambda x:fmt_money(x))
-                    show_machine=show_machine.drop(columns=["Impacto R$"])
-                    st.dataframe(show_machine,use_container_width=True,hide_index=True,height=285)
-            with b:
-                panel_title("Causas — Pareto do recorte","Causa dominante e impacto econômico estimado")
-                if cause_df.empty:
-                    st.info("A base não possui causas de manutenção estruturadas neste recorte.")
-                else:
-                    show_cause=cause_df.copy()
-                    show_cause["Paradas h"]=show_cause["Paradas h"].round(1)
-                    show_cause["% das horas"]=show_cause["% das horas"].map(lambda x:f"{x:.1%}")
-                    show_cause["Impacto"]=show_cause["Impacto R$"].map(lambda x:fmt_money(x))
-                    show_cause=show_cause.drop(columns=["Impacto R$"])
-                    st.dataframe(show_cause,use_container_width=True,hide_index=True,height=285)
-
-        elif drill_kpi=="Refugo":
-            qprod=ae.quality_product_drilldown(ACTIVE_DATA,selected_line)
-            if qprod.empty:
-                st.info("Sem granularidade de produto na Qualidade para este recorte.")
-            else:
-                st.caption("Para Refugo, o caminho correto disponível na base atual é KPI → Linha → Produto. Máquina/causa de qualidade só será afirmada quando essa dimensão existir na fonte.")
-                qshow=qprod.copy()
-                qshow["Taxa Refugo"]=qshow["Taxa Refugo"].map(lambda x:f"{x:.1%}")
-                st.dataframe(qshow,use_container_width=True,hide_index=True,height=300)
-
-        elif drill_kpi=="Horas extras":
-            if ACTIVE_DATA and "pessoas" in ACTIVE_DATA:
-                pe=ACTIVE_DATA["pessoas"].copy()
-                if not pe.empty and "horas_extras" in pe.columns:
-                    pe["horas_extras"]=pd.to_numeric(pe["horas_extras"],errors="coerce").fillna(0)
-                    dims=["linha"] if "linha" in pe.columns else []
-                    if "turno" in pe.columns:
-                        dims.append("turno")
-                    if dims:
-                        pshow=pe.groupby(dims,as_index=False)["horas_extras"].sum().sort_values("horas_extras",ascending=False)
-                        pshow=pshow.rename(columns={"linha":"Linha","turno":"Turno","horas_extras":"Horas extras"})
-                        st.dataframe(pshow,use_container_width=True,hide_index=True,height=300)
+                a,b=st.columns([1,.95],gap="small")
+                with a:
+                    panel_title("Máquinas — perda de disponibilidade","Horas de parada, eventos, MTTR e impacto estimado")
+                    if machine_view.empty:
+                        st.info("A base não possui máquina + manutenção suficientes para este recorte.")
                     else:
-                        st.info("A base de Pessoas não possui Linha/Turno para drill-down.")
-                else:
-                    st.info("Sem dados de horas extras no recorte.")
-            else:
-                st.info("Drill-down de Pessoas disponível após importação.")
-
-        elif drill_kpi=="Custo industrial/unidade":
-            if ACTIVE_DATA and "custos" in ACTIVE_DATA:
-                cc=ACTIVE_DATA["custos"].copy()
-                if not cc.empty:
-                    cost_cols=[c for c in ["custo_mp","custo_mod","custo_energia","custo_manutencao","custo_frete","ggf_outros","custo_fixo"] if c in cc.columns]
-                    for col in cost_cols+["receita"]:
-                        if col in cc.columns:
-                            cc[col]=pd.to_numeric(cc[col],errors="coerce").fillna(0)
-                    dims=[c for c in ["linha","produto"] if c in cc.columns]
-                    if dims and cost_cols:
-                        cc["_custo"]=cc[cost_cols].sum(axis=1)
-                        cshow=cc.groupby(dims,as_index=False).agg(Custo=("_custo","sum"),Receita=("receita","sum"))
-                        cshow["Custo / Receita"]=cshow.apply(lambda r:safe_div(r["Custo"],r["Receita"]),axis=1)
-                        cshow=cshow.sort_values("Custo / Receita",ascending=False)
-                        cshow["Custo"]=cshow["Custo"].map(lambda x:fmt_money(x))
-                        cshow["Receita"]=cshow["Receita"].map(lambda x:fmt_money(x))
-                        cshow["Custo / Receita"]=cshow["Custo / Receita"].map(lambda x:f"{x:.1%}")
-                        st.dataframe(cshow,use_container_width=True,hide_index=True,height=300)
+                        show_machine=machine_view.copy()
+                        show_machine["Paradas h"]=show_machine["Paradas h"].round(1)
+                        show_machine["MTTR min"]=show_machine["MTTR min"].round(0)
+                        show_machine["Impacto"]=show_machine["Impacto R$"].map(lambda x:fmt_money(x))
+                        show_machine=show_machine.drop(columns=["Impacto R$"])
+                        st.dataframe(show_machine,use_container_width=True,hide_index=True,height=285)
+                with b:
+                    panel_title("Causas — Pareto do recorte","Causa dominante e impacto econômico estimado")
+                    if cause_view.empty:
+                        st.info("A base não possui causas de manutenção estruturadas neste recorte.")
                     else:
-                        st.info("Custos não possuem granularidade de Linha/Produto suficiente.")
+                        show_cause=cause_view.copy()
+                        show_cause["Paradas h"]=show_cause["Paradas h"].round(1)
+                        show_cause["% das horas"]=show_cause["% das horas"].map(lambda x:f"{x:.1%}")
+                        show_cause["Impacto"]=show_cause["Impacto R$"].map(lambda x:fmt_money(x))
+                        show_cause=show_cause.drop(columns=["Impacto R$"])
+                        st.dataframe(show_cause,use_container_width=True,hide_index=True,height=285)
+
+            elif drill_kpi=="Refugo":
+                qprod=ae.quality_product_drilldown(ACTIVE_DATA,selected_line)
+                if qprod.empty:
+                    st.info("Sem granularidade de produto na Qualidade para este recorte.")
                 else:
-                    st.info("Sem custos no recorte.")
-            else:
-                st.info("Drill-down de custos disponível após importação.")
+                    st.caption("Para Refugo, o caminho correto disponível na base atual é KPI → Linha → Produto. Máquina/causa de qualidade só será afirmada quando essa dimensão existir na fonte.")
+                    qshow=qprod.copy()
+                    qshow["Taxa Refugo"]=qshow["Taxa Refugo"].map(lambda x:f"{x:.1%}")
+                    st.dataframe(qshow,use_container_width=True,hide_index=True,height=300)
+
+            elif drill_kpi=="Horas extras":
+                if ACTIVE_DATA and "pessoas" in ACTIVE_DATA:
+                    pe=ACTIVE_DATA["pessoas"].copy()
+                    if not pe.empty and "horas_extras" in pe.columns:
+                        pe["horas_extras"]=pd.to_numeric(pe["horas_extras"],errors="coerce").fillna(0)
+                        dims=["linha"] if "linha" in pe.columns else []
+                        if "turno" in pe.columns:
+                            dims.append("turno")
+                        if dims:
+                            pshow=pe.groupby(dims,as_index=False)["horas_extras"].sum().sort_values("horas_extras",ascending=False)
+                            pshow=pshow.rename(columns={"linha":"Linha","turno":"Turno","horas_extras":"Horas extras"})
+                            if selected_line and "Linha" in pshow.columns:
+                                pshow=pshow[pshow["Linha"].astype(str)==str(selected_line)]
+                            st.dataframe(pshow,use_container_width=True,hide_index=True,height=300)
+                        else:
+                            st.info("A base de Pessoas não possui Linha/Turno para drill-down.")
+                    else:
+                        st.info("Sem dados de horas extras no recorte.")
+                else:
+                    st.info("Drill-down de Pessoas disponível após importação.")
+
+            elif drill_kpi=="Custo industrial/unidade":
+                if ACTIVE_DATA and "custos" in ACTIVE_DATA:
+                    cc=ACTIVE_DATA["custos"].copy()
+                    if not cc.empty:
+                        cost_cols=[c for c in ["custo_mp","custo_mod","custo_energia","custo_manutencao","custo_frete","ggf_outros","custo_fixo"] if c in cc.columns]
+                        for col in cost_cols+["receita"]:
+                            if col in cc.columns:
+                                cc[col]=pd.to_numeric(cc[col],errors="coerce").fillna(0)
+                        dims=[c for c in ["linha","produto"] if c in cc.columns]
+                        if dims and cost_cols:
+                            cc["_custo"]=cc[cost_cols].sum(axis=1)
+                            cshow=cc.groupby(dims,as_index=False).agg(Custo=("_custo","sum"),Receita=("receita","sum"))
+                            if selected_line and "linha" in cshow.columns:
+                                cshow=cshow[cshow["linha"].astype(str)==str(selected_line)]
+                            cshow["Custo / Receita"]=cshow.apply(lambda r:safe_div(r["Custo"],r["Receita"]),axis=1)
+                            cshow=cshow.sort_values("Custo / Receita",ascending=False)
+                            cshow["Custo"]=cshow["Custo"].map(lambda x:fmt_money(x))
+                            cshow["Receita"]=cshow["Receita"].map(lambda x:fmt_money(x))
+                            cshow["Custo / Receita"]=cshow["Custo / Receita"].map(lambda x:f"{x:.1%}")
+                            st.dataframe(cshow,use_container_width=True,hide_index=True,height=300)
+                        else:
+                            st.info("Custos não possuem granularidade de Linha/Produto suficiente.")
+                    else:
+                        st.info("Sem custos no recorte.")
+                else:
+                    st.info("Drill-down de custos disponível após importação.")
+
+    render_performance_drilldown()
 
     st.write("")
     with st.expander("Cobertura dos filtros no modelo de dados"):
@@ -3348,29 +3512,37 @@ elif page == "Finanças / DRE":
 
 
 elif page == "Alavancas de Valor":
-    page_header("Alavancas de Valor","Simule as 26 alavancas por valor atual → valor meta e veja o efeito na DRE gerencial.")
+    page_header("Alavancas de Valor","Ajuste os drivers pelo valor que deseja atingir e veja o efeito no OEE, capacidade, DRE e EBITDA.")
 
     B=simulator_baselines(D)
 
-    target_defaults={
-        "oee":78.0,
-        "availability":82.0,
-        "performance":97.0,
-        "capacity":80.0,
-        "scrap":2.5,
-        "rework":2.0,
-        "setup":35.0,
+    # O simulador sempre abre neutro: Atual = Meta.
+    # OEE não é mais uma entrada editável; é calculado automaticamente pelos drivers.
+    lever_names=[
+        "availability","performance","capacity","scrap","rework","setup","unplanned_hours","mttr",
+        "overtime_hours","productivity","headcount","mp_specific","mp_price","material_loss_pct",
+        "energy_intensity","freight_per_unit","otif","price_per_unit","mix_pp","volume_units",
+        "fixed_industrial","contracts_services","inventory_days","dpo_days","dso_days"
+    ]
+
+    example_targets={
+        "availability":min(99.0,B["availability"]+2.0),
+        "performance":min(100.0,B["performance"]+2.0),
+        "capacity":min(95.0,B["capacity"]+5.0),
+        "scrap":max(0.0,B["scrap"]*0.85),
+        "rework":max(0.0,B["rework"]*0.85),
+        "setup":max(0.0,B["setup"]*0.85),
         "unplanned_hours":max(0.0,B["unplanned_hours"]*0.80),
-        "mttr":70.0,
+        "mttr":max(0.0,B["mttr"]*0.80),
         "overtime_hours":max(0.0,B["overtime_hours"]*0.75),
-        "productivity":20.0 if B["productivity"]<20 else B["productivity"]*1.05,
+        "productivity":B["productivity"]*1.05,
         "headcount":B["headcount"],
-        "mp_specific":1.0 if B["mp_specific_unit"]=="índice" else B["mp_specific"]*0.96,
-        "mp_price":0.97 if B["mp_price_unit"]=="índice" else B["mp_price"]*0.97,
+        "mp_specific":B["mp_specific"]*0.96,
+        "mp_price":B["mp_price"]*0.97,
         "material_loss_pct":max(0.0,B["material_loss_pct"]*0.85),
         "energy_intensity":B["energy_intensity"]*0.92,
         "freight_per_unit":B["freight_per_unit"]*0.95,
-        "otif":95.0,
+        "otif":min(100.0,max(B["otif"],95.0)),
         "price_per_unit":B["price_per_unit"]*1.02,
         "mix_pp":1.0,
         "volume_units":B["volume_units"]*1.05,
@@ -3381,19 +3553,21 @@ elif page == "Alavancas de Valor":
         "dso_days":max(0.0,B["dso_days"]-5),
     }
 
-    lever_names=[
-        "oee","availability","performance","capacity","scrap","rework","setup","unplanned_hours","mttr",
-        "overtime_hours","productivity","headcount","mp_specific","mp_price","material_loss_pct",
-        "energy_intensity","freight_per_unit","otif","price_per_unit","mix_pp","volume_units",
-        "fixed_industrial","contracts_services","inventory_days","dpo_days","dso_days"
-    ]
+    # Migração de estado: evita carregar 33%, 20%, 1% etc. de versões anteriores.
+    simulator_state_version="0.6.4.4"
+    if st.session_state.get("simulator_state_version") != simulator_state_version:
+        for old_key in list(st.session_state.keys()):
+            if str(old_key).startswith("simt_") or old_key=="sim_prod_mode":
+                st.session_state.pop(old_key,None)
+        for name in lever_names:
+            st.session_state[f"simt_{name}"]=float(B[name])
+        st.session_state.simulator_state_version=simulator_state_version
+
     for name in lever_names:
         key=f"simt_{name}"
         if key not in st.session_state:
-            st.session_state[key]=float(target_defaults[name])
+            st.session_state[key]=float(B[name])
 
-    if "sim_prod_mode" not in st.session_state:
-        st.session_state.sim_prod_mode="OEE direto"
     if "sim_group" not in st.session_state:
         st.session_state.sim_group="Produção"
 
@@ -3403,14 +3577,14 @@ elif page == "Alavancas de Valor":
             st.markdown(
                 "<div class='sim-header'><div>"
                 "<div class='sim-header-title'>Simulador Atual → Meta</div>"
-                "<div class='sim-header-sub'>O usuário informa onde quer chegar; o motor calcula variação, dependências e impacto financeiro.</div>"
-                "</div><div><span class='sim-scope-chip'>26 ALAVANCAS · DRE GERENCIAL</span></div></div>",
+                "<div class='sim-header-sub'>Informe o valor-meta de cada driver. O sistema calcula automaticamente variação, OEE projetado, capacidade e impacto financeiro.</div>"
+                "</div><div><span class='sim-scope-chip'>DRIVERS + OEE CALCULADO</span></div></div>",
                 unsafe_allow_html=True
             )
         with c2:
             if st.button("Cenário exemplo",use_container_width=True):
                 for name in lever_names:
-                    st.session_state[f"simt_{name}"]=float(target_defaults[name])
+                    st.session_state[f"simt_{name}"]=float(example_targets[name])
                 st.rerun()
         with c3:
             if st.button("Resetar para atual",use_container_width=True):
@@ -3452,31 +3626,54 @@ elif page == "Alavancas de Valor":
         st.caption(f"Atual {current_txt} → Meta {target_txt} · Δ {d}")
         return target
 
+    def projected_oee_from_state():
+        base_avail=max(0.0001,float(D.get("availability",0.0001)))
+        base_quality=max(0.0001,float(D.get("quality",1.0)))
+        setup_target=float(st.session_state.get("simt_setup",B["setup"]))
+        unplanned_target=float(st.session_state.get("simt_unplanned_hours",B["unplanned_hours"]))
+        mttr_target=float(st.session_state.get("simt_mttr",B["mttr"]))
+        setup_improvement=(B["setup"]-setup_target)/max(B["setup"],1e-9)
+        unplanned_improvement=(B["unplanned_hours"]-unplanned_target)/max(B["unplanned_hours"],1e-9) if B["unplanned_hours"]>0 else 0
+        mttr_improvement=(B["mttr"]-mttr_target)/max(B["mttr"],1e-9)
+        downtime_share=max(0.0,1-base_avail)
+        process_recovery=downtime_share*(0.25*setup_improvement+0.45*unplanned_improvement+0.30*mttr_improvement)
+        derived_availability=float(np.clip(base_avail+process_recovery,0.01,0.99))
+        target_availability=float(np.clip(float(st.session_state.get("simt_availability",B["availability"]))/100,0.01,0.99))
+        effective_availability=max(target_availability,derived_availability)
+        effective_performance=float(np.clip(float(st.session_state.get("simt_performance",B["performance"]))/100,0.01,1.05))
+        base_scrap=float(B["scrap"])/100
+        target_scrap=float(st.session_state.get("simt_scrap",B["scrap"]))/100
+        quality_ratio=(1-target_scrap)/max(1-base_scrap,0.001)
+        effective_quality=float(np.clip(base_quality*quality_ratio,0.01,1.0))
+        return float(np.clip(effective_availability*min(effective_performance,1.0)*effective_quality,0.01,0.99))*100
+
     left,right=st.columns([1.32,.68],gap="small")
     with left:
         with st.container(border=True):
-            top1,top2=st.columns([.58,.42],gap="small")
             groups=["Produção","Qualidade","Processo","Pessoas","Materiais","Energia","Logística","Financeiro","Estrutura","Capital"]
-            with top1:
-                group=st.selectbox("Grupo de alavancas",groups,key="sim_group")
-            with top2:
-                prod_mode=st.radio(
-                    "Motor de Produção",["OEE direto","Drivers de OEE"],
-                    horizontal=True,key="sim_prod_mode",
-                    help="OEE direto usa a meta de OEE. Drivers recalcula OEE com disponibilidade e performance. Os caminhos não são somados."
-                )
+            group=st.selectbox("Grupo de alavancas",groups,key="sim_group")
             st.markdown("---")
 
             if group=="Produção":
-                st.markdown("<div class='lever-kicker'>PRODUÇÃO</div><div class='lever-title'>Capacidade e eficiência — sempre Atual → Meta</div>",unsafe_allow_html=True)
+                st.markdown("<div class='lever-kicker'>PRODUÇÃO</div><div class='lever-title'>Drivers de capacidade e eficiência — Atual → Meta</div>",unsafe_allow_html=True)
                 a,b=st.columns(2,gap="medium")
                 with a:
-                    target_input("Meta simulada — OEE","oee",B["oee"],"%",.5,20,100,"%.1f")
-                    target_input("Meta simulada — Disponibilidade","availability",B["availability"],"%",.5,20,100,"%.1f")
+                    target_input("Meta simulada — Disponibilidade","availability",B["availability"],"%",.5,0,100,"%.1f")
+                    target_input("Meta simulada — Performance","performance",B["performance"],"%",.5,0,105,"%.1f")
                 with b:
-                    target_input("Meta simulada — Performance","performance",B["performance"],"%",.5,20,105,"%.1f")
-                    target_input("Meta simulada — Capacidade utilizada","capacity",B["capacity"],"%",.5,1,100,"%.1f")
-                st.markdown("<div class='frontend-note'>No modo OEE direto, a meta de OEE define a capacidade potencial. No modo Drivers, disponibilidade e performance formam o OEE. Capacidade habilitada só vira EBITDA quando o volume é vendido.</div>",unsafe_allow_html=True)
+                    target_input("Meta simulada — Capacidade utilizada","capacity",B["capacity"],"%",.5,0,100,"%.1f")
+                    projected_oee=projected_oee_from_state()
+                    oee_delta=projected_oee-B["oee"]
+                    target_oee_pct=float(D.get("target_oee",np.nan))*100 if pd.notna(D.get("target_oee",np.nan)) else np.nan
+                    st.markdown(
+                        f"<div class='lever-shell'><div class='lever-kicker'>OEE — RESULTADO CALCULADO</div>"
+                        f"<div class='lever-title'>{projected_oee:.1f}% projetado</div>"
+                        f"<div class='lever-meta'>Atual {B['oee']:.1f}% → Projetado {projected_oee:.1f}% · Δ {oee_delta:+.1f} pp"
+                        + (f" · Meta KPI {target_oee_pct:.1f}%" if pd.notna(target_oee_pct) else "")
+                        + "</div></div>",
+                        unsafe_allow_html=True
+                    )
+                st.markdown("<div class='frontend-note'><b>OEE não é mais um campo editável.</b> Ele é calculado automaticamente a partir de Disponibilidade × Performance × Qualidade. A Qualidade acompanha a meta de refugo definida no grupo Qualidade. Setup, paradas e MTTR atuam como drivers de Disponibilidade sem criar um segundo caminho de OEE.</div>",unsafe_allow_html=True)
 
             elif group=="Qualidade":
                 st.markdown("<div class='lever-kicker'>QUALIDADE</div><div class='lever-title'>Yield, desperdício e retrabalho</div>",unsafe_allow_html=True)
@@ -3562,7 +3759,7 @@ elif page == "Alavancas de Valor":
                     st.markdown("<div class='frontend-note'>Capital de giro é calculado em caixa e permanece fora do EBITDA.</div>",unsafe_allow_html=True)
 
     targets={name:float(st.session_state[f"simt_{name}"]) for name in lever_names}
-    R=calculate_simulator_scenario(D,targets,st.session_state.sim_prod_mode)
+    R=calculate_simulator_scenario(D,targets)
 
     active_count=sum(1 for name in lever_names if abs(targets[name]-float(B[name]))>1e-8)
 
