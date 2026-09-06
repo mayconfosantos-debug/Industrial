@@ -9,11 +9,11 @@ import re
 import numpy as np
 import pandas as pd
 
-ANALYTICS_VERSION = "0.6.4"
+ANALYTICS_VERSION = "0.6.4.1"
 
 DIMENSION_ALIASES = {
     "grupo": ["grupo", "grupo_empresa", "grupo_industrial", "business_group"],
-    "planta": ["fabrica", "planta", "unidade", "site", "factory"],
+    "planta": ["fabrica", "planta", "site", "factory", "unidade_fabril", "business_unit"],
     "linha": ["linha", "line", "workcenter", "centro_trabalho"],
     "produto": ["produto", "sku", "product", "material", "item"],
 }
@@ -44,43 +44,47 @@ def _safe_div(a: float, b: float) -> float:
 
 
 def filter_options(data: Optional[Dict[str, pd.DataFrame]]) -> Dict[str, Any]:
-    """Collect real filter options from all canonical entities."""
+    """
+    Build global filter options from Produção, the authoritative operational grain.
+
+    This prevents the UI from offering a Plant/Product that exists only in a
+    secondary table and therefore cannot recalculate the core cockpit correctly.
+    If Produção is unavailable, fall back to the union of fact entities.
+    """
     out: Dict[str, Any] = {
-        "grupo": [],
-        "planta": [],
-        "linha": [],
-        "produto": [],
-        "date_min": None,
-        "date_max": None,
+        "grupo": [], "planta": [], "linha": [], "produto": [],
+        "date_min": None, "date_max": None,
     }
     if not data:
         return out
 
-    dims = {k: set() for k in ["grupo", "planta", "linha", "produto"]}
+    dims = {k: set() for k in ["grupo","planta","linha","produto"]}
     dates: List[pd.Timestamp] = []
 
-    fact_entities={"producao","qualidade","manutencao","pessoas","custos","dre_gerencial"}
-    for entity, df in data.items():
-        if entity not in fact_entities:
-            continue
-        if df is None or not isinstance(df, pd.DataFrame) or df.empty:
-            continue
-        for dim, aliases in DIMENSION_ALIASES.items():
-            col = _find_column(df, aliases)
+    prod=data.get("producao")
+    if isinstance(prod,pd.DataFrame) and not prod.empty:
+        sources=[("producao",prod)]
+    else:
+        fact_entities={"producao","qualidade","manutencao","pessoas","custos","dre_gerencial"}
+        sources=[(e,df) for e,df in data.items() if e in fact_entities and isinstance(df,pd.DataFrame) and not df.empty]
+
+    for _,df in sources:
+        for dim,aliases in DIMENSION_ALIASES.items():
+            col=_find_column(df,aliases)
             if col:
-                vals = df[col].dropna().astype(str).str.strip()
-                dims[dim].update(v for v in vals if v and v.lower() not in {"nan", "none", "<na>"})
-        dcol = _find_column(df, DATE_FIELDS)
+                vals=df[col].dropna().astype(str).str.strip()
+                dims[dim].update(v for v in vals if v and v.lower() not in {"nan","none","<na>"})
+        dcol=_find_column(df,DATE_FIELDS)
         if dcol:
-            ds = pd.to_datetime(df[dcol], errors="coerce").dropna()
+            ds=pd.to_datetime(df[dcol],errors="coerce").dropna()
             if not ds.empty:
-                dates.extend([ds.min(), ds.max()])
+                dates.extend([ds.min(),ds.max()])
 
     for dim in dims:
-        out[dim] = sorted(dims[dim], key=lambda x: _norm(x))
+        out[dim]=sorted(dims[dim],key=lambda x:_norm(x))
     if dates:
-        out["date_min"] = min(dates).normalize()
-        out["date_max"] = max(dates).normalize()
+        out["date_min"]=min(dates).normalize()
+        out["date_max"]=max(dates).normalize()
     return out
 
 
@@ -89,15 +93,24 @@ def apply_filters(
     filters: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Optional[Dict[str, pd.DataFrame]], Dict[str, Any]]:
     """
-    Apply Group / Plant / Period / Line / Product filters to every canonical
-    entity that carries the dimension. Returns filtered data plus coverage metadata.
+    Apply filters only where they are semantically valid.
 
-    If a detailed line/product filter is active but DRE_Gerencial does not have that
-    dimension, the managerial DRE is removed so the app falls back to detailed Custos
-    rather than mixing plant-level finance with line-level operations.
+    Fact entities:
+      producao, qualidade, manutencao, pessoas, custos, dre_gerencial
+
+    Reference/governance entities (metas, premissas, responsáveis, plano de contas)
+    are NOT filtered by plant/date simply because they contain generic columns such
+    as "unidade". This prevents targets from disappearing under operational filters.
+
+    If a fact source lacks an active dimension, it remains available but is marked
+    as outside the requested scope. Downstream engines must not use it as if it
+    represented the filtered slice.
     """
     if not data:
-        return data, {"active": False, "coverage": pd.DataFrame(), "warnings": [], "empty": False}
+        return data, {
+            "active": False, "coverage": pd.DataFrame(), "warnings": [],
+            "empty": False, "financial_allocation": False, "filters": {}
+        }
 
     filters = filters or {}
     start = filters.get("start")
@@ -110,6 +123,12 @@ def apply_filters(
     }
     active_dims = {k: v for k, v in active_dims.items() if v not in (None, "", "Todos", "Todas")}
 
+    fact_entities={"producao","qualidade","manutencao","pessoas","custos","dre_gerencial"}
+    reference_entities={
+        "metas","parametros_diagnostico","responsaveis","alavancas_simulador",
+        "premissas_simulador","plano_contas_dre"
+    }
+
     result: Dict[str, pd.DataFrame] = {}
     coverage_rows: List[Dict[str, Any]] = []
     warnings: List[str] = []
@@ -118,19 +137,66 @@ def apply_filters(
         if original is None or not isinstance(original, pd.DataFrame):
             result[entity] = original
             continue
-        df = original.copy()
-        applied = []
-        missing = []
 
-        dcol = _find_column(df, DATE_FIELDS)
-        if (start is not None or end is not None):
+        # Reference/governance tables remain global.
+        if entity in reference_entities:
+            result[entity] = original.copy().reset_index(drop=True)
+            coverage_rows.append({
+                "Entidade": entity,
+                "Linhas origem": int(len(original)),
+                "Linhas filtradas": int(len(original)),
+                "Filtros aplicados": "referência global",
+                "Dimensões ausentes": "—",
+                "Escopo válido": "Sim",
+            })
+            continue
+
+        # Product standards should follow Product only; not plant/date.
+        if entity == "padroes_produto":
+            df=original.copy()
+            applied=[]
+            if "produto" in active_dims:
+                col=_find_column(df,DIMENSION_ALIASES["produto"])
+                if col:
+                    df=df.loc[df[col].astype(str).str.strip()==str(active_dims["produto"]).strip()].copy()
+                    applied.append("produto")
+            result[entity]=df.reset_index(drop=True)
+            coverage_rows.append({
+                "Entidade": entity,
+                "Linhas origem": int(len(original)),
+                "Linhas filtradas": int(len(df)),
+                "Filtros aplicados": ", ".join(applied) if applied else "referência de produto",
+                "Dimensões ausentes": "—",
+                "Escopo válido": "Sim",
+            })
+            continue
+
+        # Unknown auxiliary tables pass through untouched.
+        if entity not in fact_entities:
+            result[entity]=original.copy().reset_index(drop=True)
+            coverage_rows.append({
+                "Entidade": entity,
+                "Linhas origem": int(len(original)),
+                "Linhas filtradas": int(len(original)),
+                "Filtros aplicados": "—",
+                "Dimensões ausentes": "—",
+                "Escopo válido": "Sim",
+            })
+            continue
+
+        df = original.copy()
+        applied: List[str] = []
+        missing: List[str] = []
+
+        # Period applies only to fact tables.
+        if start is not None or end is not None:
+            dcol = _find_column(df, DATE_FIELDS)
             if dcol:
                 dser = pd.to_datetime(df[dcol], errors="coerce")
                 mask = pd.Series(True, index=df.index)
                 if start is not None:
                     mask &= dser >= pd.Timestamp(start)
                 if end is not None:
-                    # Include the whole selected final date.
                     mask &= dser < (pd.Timestamp(end) + pd.Timedelta(days=1))
                 df = df.loc[mask].copy()
                 applied.append("período")
@@ -145,6 +211,12 @@ def apply_filters(
             else:
                 missing.append(dim)
 
+        # A fact source is in-scope only if it supports all active operational dimensions.
+        required_scope_dims=list(active_dims.keys())
+        if start is not None or end is not None:
+            required_scope_dims.append("período")
+        scope_valid=not any(dim in missing for dim in required_scope_dims)
+
         result[entity] = df.reset_index(drop=True)
         coverage_rows.append({
             "Entidade": entity,
@@ -152,7 +224,10 @@ def apply_filters(
             "Linhas filtradas": int(len(df)),
             "Filtros aplicados": ", ".join(applied) if applied else "—",
             "Dimensões ausentes": ", ".join(missing) if missing else "—",
+            "Escopo válido": "Sim" if scope_valid else "Não",
         })
+
+    coverage=pd.DataFrame(coverage_rows)
 
     # Prevent financial dimensional mismatch.
     # If DRE is aggregated and a line/product filter is active, allocate the managerial
@@ -220,7 +295,6 @@ def apply_filters(
 
             revenue_share=_ratio("receita",0.0)
             if revenue_share<=0:
-                # fall back to production volume share
                 base_prod=data.get("producao")
                 selected_prod=result.get("producao")
                 if isinstance(base_prod,pd.DataFrame) and not base_prod.empty and "realizado" in base_prod.columns:
@@ -263,6 +337,13 @@ def apply_filters(
             allocated["_base_alocacao"]=f"participação do recorte em Custos/Produção ({revenue_share:.1%})"
             result["dre_gerencial"]=allocated
             financial_allocation=True
+
+            # Mark DRE as valid after controlled managerial allocation.
+            if not coverage.empty:
+                mask=coverage["Entidade"].astype(str)=="dre_gerencial"
+                coverage.loc[mask,"Escopo válido"]="Sim"
+                coverage.loc[mask,"Filtros aplicados"]=coverage.loc[mask,"Filtros aplicados"].astype(str) + " + alocação gerencial"
+
             warnings.append(
                 "A DRE Gerencial não possui " + " e ".join(missing_detail_dims) + ". "
                 f"Para este drill-down, custos fixos e despesas foram alocados gerencialmente pelo peso do recorte "
@@ -271,9 +352,10 @@ def apply_filters(
 
     prod = result.get("producao")
     empty = bool(prod is not None and isinstance(prod, pd.DataFrame) and prod.empty)
+
     return result, {
         "active": bool(active_dims or start is not None or end is not None),
-        "coverage": pd.DataFrame(coverage_rows),
+        "coverage": coverage,
         "warnings": warnings,
         "empty": empty,
         "financial_allocation": financial_allocation,
@@ -577,7 +659,7 @@ def performance_engine(
     cost_target=_target(data,["Custo/unidade","Custo por unidade"])
     if pd.notna(cost_target) and cost_target>0 and cost > cost_target:
         rows.append([
-            "Custo/unidade",f"{_safe_div(cost,cost_target)-1:+.1%}","DRE / Custos",
+            "Custo industrial/unidade",f"{_safe_div(cost,cost_target)-1:+.1%}","DRE / Custos",
             "Estrutura de custo acima da referência",
             f"Custo/un {cost:.2f} vs meta {cost_target:.2f}",_impact(D,"Custo / consumo"),
             "Consumo MP","Abrir custos por linha/produto e atacar os maiores desvios de consumo e GGF.",
@@ -589,10 +671,15 @@ def performance_engine(
     margin_target=_target(data,["Margem","Margem Industrial","Margem Contribuição"])
     if pd.notna(margin_target) and margin < margin_target:
         impact=max(0.0,(margin_target-margin)*float(D.get("revenue",0)))
-        top_causes=", ".join([str(x) for x in (pd.DataFrame(rows)["Alavanca"].head(3).tolist() if rows else [])])
+        # rows is a list of positional records; Alavanca is index 6.
+        # Never create an unnamed DataFrame and access a string column here.
+        top_drivers=", ".join([
+            str(r[6]) for r in rows[:3]
+            if isinstance(r,(list,tuple)) and len(r)>6 and r[6]
+        ])
         rows.append([
             "Margem Industrial",f"{(margin-margin_target)*100:+.1f} pp","DRE Gerencial",
-            top_causes or "Drivers operacionais e de custo",
+            top_drivers or "Drivers operacionais e de custo",
             f"Margem {margin:.1%} vs meta {margin_target:.1%}",impact,
             "Portfólio de alavancas","Atacar primeiro as alavancas operacionais/custos já evidenciadas; não somar este gap como impacto adicional.",
             "Média","DRE Gerencial + Performance Engine"

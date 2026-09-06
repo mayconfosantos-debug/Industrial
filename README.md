@@ -1,4 +1,4 @@
-# Industrial Performance — v0.6.4 Analytics Engine
+# Industrial Performance — v0.6.4.1 Analytics Hotfix
 
 ## Objetivo
 A v0.6.3 cria a camada de entrada de dados do Industrial Performance:
@@ -214,3 +214,28 @@ O Excel de exemplo foi atualizado para permitir testar:
 - DRE Gerencial alinhada com a operação.
 
 `Plano_Contas_DRE` é tratado como entidade de referência própria e não contamina mais a DRE Gerencial no reconhecimento automático.
+
+## v0.6.4.1 — Hotfix de Filtros, Performance Engine e Diagnóstico
+
+Correções deste hotfix:
+
+- Corrigido o `KeyError: 'Alavanca'` no Performance Engine. A origem era a criação de um DataFrame sem nomes de colunas durante a consolidação dos drivers da Margem Industrial.
+- Tabelas de referência (`Metas`, premissas, responsáveis, plano de contas etc.) não recebem mais filtros operacionais de Planta/Período.
+- Removida a ambiguidade entre `Unidade` de medida e `Unidade` fabril no Analytics Engine.
+- As opções globais de Grupo / Planta / Linha / Produto passam a vir da granularidade de `Produção`, evitando oferecer filtros que o cockpit central não consegue recalcular.
+- O filtro de período é inicializado automaticamente com a primeira e a última data da base. O campo não deve mais abrir vazio.
+- Em combinação de filtros sem produção, o app mantém o último recorte válido em vez de voltar silenciosamente para o consolidado.
+- Quando `Pessoas` ou `Manutenção` não possuem a granularidade do filtro (ex.: Produto), seus KPIs/causas ficam fora do score ou sem atribuição, em vez de usar dados consolidados como se fossem do produto.
+- `Custo industrial/unidade` passa a significar `(Insumos + MOD + GGF) / Produção realizada`, excluindo custos fixos e despesas.
+- O impacto de Refugo passa a utilizar custo de matéria-prima por unidade, evitando sobrestimar a perda com custos fixos/despesas.
+- O bucket residual de custo desconta perdas já reconhecidas em Refugo, Eficiência MOD e Hora Extra para reduzir dupla contagem no diagnóstico.
+
+Testes executados:
+- Metas preservadas após filtros de Grupo/Planta/Período.
+- Performance Engine com cenário normal.
+- Performance Engine com apenas Margem Industrial desviada (caso que reproduzia o KeyError).
+- Todas as quatro Linhas.
+- Todos os quatro Produtos.
+- Produto sem granularidade em Pessoas/Manutenção.
+- Período parcial.
+- Combinação Linha × Produto sem registros.

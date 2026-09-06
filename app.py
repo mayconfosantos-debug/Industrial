@@ -837,7 +837,7 @@ def _effort_parameters(data):
                   owner if owner else old[2])
     return out
 
-def calculate_real(data):
+def calculate_real(data, scope_meta=None):
     p=data["producao"].copy()
     q=data["qualidade"].copy()
     m=data["manutencao"].copy()
@@ -845,6 +845,18 @@ def calculate_real(data):
     c=data["custos"].copy()
     dg=data.get("dre_gerencial",pd.DataFrame()).copy()
     std=data.get("padroes_produto",pd.DataFrame()).copy()
+
+    def _scope_valid(entity):
+        coverage=(scope_meta or {}).get("coverage")
+        if not isinstance(coverage,pd.DataFrame) or coverage.empty or "Entidade" not in coverage.columns:
+            return True
+        hit=coverage[coverage["Entidade"].astype(str)==entity]
+        if hit.empty or "Escopo válido" not in hit.columns:
+            return True
+        return str(hit.iloc[0]["Escopo válido"]).strip().lower() != "não"
+
+    maintenance_scope_valid=_scope_valid("manutencao")
+    people_scope_valid=_scope_valid("pessoas")
 
     for col in ["planejado","realizado","horas_disponiveis","horas_paradas","velocidade_real","velocidade_nominal"]:
         p[col]=nseries(p[col])
@@ -861,6 +873,11 @@ def calculate_real(data):
         c[col]=nseries(c[col])
     for col in ["custo_frete","ggf_outros","custo_fixo"]:
         c[col]=nseries(c[col]) if col in c.columns else 0
+
+    # Fact sources that cannot represent the active filter must not be treated as
+    # if they belonged to that slice (e.g. Pessoas without Produto).
+    m_scope=m if maintenance_scope_valid else m.iloc[0:0].copy()
+    pe_scope=pe if people_scope_valid else pe.iloc[0:0].copy()
 
     if dg is not None and not dg.empty:
         for col in [
@@ -958,7 +975,7 @@ def calculate_real(data):
     margin_contrib=industrial_margin
     var_cost=industrial_cost
     fixed_cost=fixed_industrial+expenses_total
-    cost_unit=safe_div(total_cost,actual)
+    cost_unit=safe_div(industrial_cost,actual)
 
     dre=pd.DataFrame({
         "Linha":[
@@ -978,24 +995,30 @@ def calculate_real(data):
         ]
     })
 
-    overtime=pe["horas_extras"].sum()
-    actual_hh=pe["horas_normais"].sum()+overtime
-    productivity_raw=safe_div(actual,actual_hh)
+    if people_scope_valid:
+        overtime=float(pe_scope["horas_extras"].sum())
+        actual_hh=float(pe_scope["horas_normais"].sum()+overtime)
+        productivity_raw=safe_div(actual,actual_hh)
+    else:
+        overtime=np.nan
+        actual_hh=np.nan
+        productivity_raw=np.nan
+
     avg_headcount=np.nan
-    if "operadores" in pe.columns:
-        pe["operadores"]=nseries(pe["operadores"])
-        if "data" in pe.columns:
-            daily_hc=pe.groupby("data")["operadores"].sum()
+    if people_scope_valid and "operadores" in pe_scope.columns:
+        pe_scope["operadores"]=nseries(pe_scope["operadores"])
+        if "data" in pe_scope.columns:
+            daily_hc=pe_scope.groupby("data")["operadores"].sum()
             avg_headcount=float(daily_hc.mean()) if len(daily_hc) else np.nan
         else:
-            avg_headcount=float(pe["operadores"].mean()) if len(pe) else np.nan
+            avg_headcount=float(pe_scope["operadores"].mean()) if len(pe_scope) else np.nan
 
     # ---------------- Mix linearization / labor efficiency ----------------
     labor_eff=np.nan
     std_hours_earned=np.nan
     standards_missing=[]
     labor_gap_cost=0.0
-    if std is not None and not std.empty and "produto" in std.columns:
+    if people_scope_valid and std is not None and not std.empty and "produto" in std.columns:
         if "hh_padrao_un" not in std.columns:
             std["hh_padrao_un"]=np.nan
         std["hh_padrao_un"]=pd.to_numeric(std["hh_padrao_un"],errors="coerce")
@@ -1036,7 +1059,7 @@ def calculate_real(data):
     for line in sorted(p["linha"].astype(str).unique()):
         pp=p[p["linha"].astype(str)==line]
         qq=q[q["linha"].astype(str)==line]
-        mm=m[m["linha"].astype(str)==line]
+        mm=m_scope[m_scope["linha"].astype(str)==line] if maintenance_scope_valid else m_scope
         av=max(0,min(1,1-safe_div(pp["horas_paradas"].sum(),pp["horas_disponiveis"].sum())))
         rr=(pp["velocidade_real"]/pp["velocidade_nominal"].replace(0,np.nan)).replace([np.inf,-np.inf],np.nan)
         pf=float(rr.mean()) if rr.notna().any() else 0
@@ -1046,43 +1069,51 @@ def calculate_real(data):
             "Linha":line,"OEE":oo,"Disponibilidade":av,"Performance":pf,"Qualidade":qu,
             "Refugo":safe_div(qq["refugo"].sum(),qq["produzido"].sum()),
             "Gap Produção":pp["realizado"].sum()-pp["planejado"].sum(),
-            "Paradas h":mm["duracao_horas"].sum()
+            "Paradas h":float(mm["duracao_horas"].sum()) if maintenance_scope_valid else np.nan
         })
     line_perf=pd.DataFrame(rows)
 
-    mttr_min=float(m["duracao_horas"].mean()*60) if len(m) else np.nan
+    mttr_min=float(m_scope["duracao_horas"].mean()*60) if maintenance_scope_valid and len(m_scope) else np.nan
     setup_avg_min=np.nan
-    if "tipo_parada" in m.columns:
-        setup_mask=m["tipo_parada"].astype(str).map(norm).str.contains("setup|troca|changeover",regex=True)
+    if maintenance_scope_valid and "tipo_parada" in m_scope.columns:
+        setup_mask=m_scope["tipo_parada"].astype(str).map(norm).str.contains("setup|troca|changeover",regex=True)
         if setup_mask.any():
-            setup_avg_min=float(m.loc[setup_mask,"duracao_horas"].mean()*60)
-    if pd.isna(setup_avg_min) and "causa" in m.columns:
-        setup_mask=m["causa"].astype(str).map(norm).str.contains("setup|troca|changeover",regex=True)
+            setup_avg_min=float(m_scope.loc[setup_mask,"duracao_horas"].mean()*60)
+    if maintenance_scope_valid and pd.isna(setup_avg_min) and "causa" in m_scope.columns:
+        setup_mask=m_scope["causa"].astype(str).map(norm).str.contains("setup|troca|changeover",regex=True)
         if setup_mask.any():
-            setup_avg_min=float(m.loc[setup_mask,"duracao_horas"].mean()*60)
+            setup_avg_min=float(m_scope.loc[setup_mask,"duracao_horas"].mean()*60)
 
-    if "tipo_parada" in m.columns:
-        planned_mask=m["tipo_parada"].astype(str).map(norm).str.contains("setup|planejada|preventiva|planned",regex=True)
-        unplanned_downtime_h=float(m.loc[~planned_mask,"duracao_horas"].sum())
+    if maintenance_scope_valid and "tipo_parada" in m_scope.columns:
+        planned_mask=m_scope["tipo_parada"].astype(str).map(norm).str.contains("setup|planejada|preventiva|planned",regex=True)
+        unplanned_downtime_h=float(m_scope.loc[~planned_mask,"duracao_horas"].sum())
+    elif maintenance_scope_valid:
+        unplanned_downtime_h=float(m_scope["duracao_horas"].sum())
     else:
-        unplanned_downtime_h=float(m["duracao_horas"].sum())
+        unplanned_downtime_h=np.nan
 
-    causes=m.groupby("causa",as_index=False)["duracao_horas"].sum().rename(columns={"causa":"Causa","duracao_horas":"Horas"})
+    causes=(m_scope.groupby("causa",as_index=False)["duracao_horas"].sum().rename(columns={"causa":"Causa","duracao_horas":"Horas"}) if maintenance_scope_valid else pd.DataFrame(columns=["Causa","Horas"]))
     if not causes.empty:
         margin_unit=safe_div(contrib,actual)
-        units_h=safe_div(actual,max(1,actual_hh))
+        productive_hours=max(1.0,float(p["horas_disponiveis"].sum()-p["horas_paradas"].sum()))
+        units_h=safe_div(actual,productive_hours)
         causes["Impacto R$ mil"]=causes["Horas"]*units_h*margin_unit/1000
         causes=causes.sort_values("Horas",ascending=False).head(8)
 
     # ---------------- Unique financial impact buckets (avoid double count) ----------------
     margin_unit=safe_div(contrib,max(1,actual))
     loss_prod=max(0,planned-actual)*margin_unit
-    loss_scrap=q["refugo"].sum()*safe_div(total_cost,max(1,actual))
-    labor_hour_rate=safe_div(cost_mod,max(actual_hh,1))
+    loss_scrap=q["refugo"].sum()*safe_div(cost_mp,max(1,actual))
+    labor_hour_rate=safe_div(cost_mod,actual_hh) if people_scope_valid and pd.notna(actual_hh) and actual_hh>0 else 0.0
     overtime_premium_factor=sim_assumption("adicional_hora_extra",0.50)
-    overtime_excess=max(0,overtime-(t_overtime if pd.notna(t_overtime) else 0)) if pd.notna(t_overtime) else overtime
-    overtime_premium=overtime_excess*labor_hour_rate*overtime_premium_factor
-    cost_gap=max(0,cost_unit-t_cost)*actual if pd.notna(t_cost) else max(0,total_cost*0.015)
+    if people_scope_valid and pd.notna(overtime):
+        overtime_excess=max(0,overtime-(t_overtime if pd.notna(t_overtime) else 0)) if pd.notna(t_overtime) else overtime
+        overtime_premium=overtime_excess*labor_hour_rate*overtime_premium_factor
+    else:
+        overtime_premium=0.0
+    gross_cost_gap=max(0,cost_unit-t_cost)*actual if pd.notna(t_cost) else max(0,industrial_cost*0.015)
+    # Residual bucket: known scrap/labor/overtime losses are already shown separately.
+    cost_gap=max(0,gross_cost_gap-loss_scrap-labor_gap_cost-overtime_premium)
     energy_gap=max(0,cost_energy*0.05)
     impacts=pd.DataFrame({
         "Impacto":["Gap de volume","Refugo","Eficiência MOD","Horas extras","Custo / consumo"],
@@ -1090,11 +1121,11 @@ def calculate_real(data):
     }).sort_values("R$",ascending=False)
 
     # ---------------- KPIs: raw units/h no longer used as consolidated productivity ----------------
-    labor_has_data=pd.notna(labor_eff)
+    labor_has_data=people_scope_valid and pd.notna(labor_eff)
     labor_score=(safe_div(labor_eff,t_labor)-1) if labor_has_data and pd.notna(t_labor) else np.nan
-    labor_mes=fmt_pct(labor_eff) if labor_has_data else "Padrão ausente"
+    labor_mes=fmt_pct(labor_eff) if labor_has_data else ("N/A no recorte" if not people_scope_valid else "Padrão ausente")
     labor_delta=(f"{(labor_eff-t_labor)*100:+.1f} pp".replace(".",",")
-                 if labor_has_data and pd.notna(t_labor) else "cadastro incompleto")
+                 if labor_has_data and pd.notna(t_labor) else ("fonte sem granularidade" if not people_scope_valid else "cadastro incompleto"))
 
     kpis=[
         ("Produção",f"{actual:,.0f} un".replace(",","."),f"{planned:,.0f}".replace(",","."),attainment-1,f"{attainment-1:+.1%}".replace(".",","),"↓" if attainment<1 else "↑"),
@@ -1102,8 +1133,13 @@ def calculate_real(data):
         ("Eficiência MOD",labor_mes,fmt_pct(t_labor) if pd.notna(t_labor) else "Meta ausente",labor_score,labor_delta,"!" if not labor_has_data else ("↓" if labor_eff<t_labor else "↑")),
         ("Refugo",fmt_pct(scrap),fmt_pct(t_scrap),1-safe_div(scrap,t_scrap),f"{(scrap-t_scrap)*100:+.1f} pp".replace(".",","),"↑" if scrap>t_scrap else "↓"),
         ("OTIF","—",fmt_pct(t_otif) if pd.notna(t_otif) else "Meta ausente",np.nan,"sem dado","!"),
-        ("Custo/unidade",fmt_money(cost_unit,2),fmt_money(t_cost,2) if pd.notna(t_cost) else "Meta ausente",(1-safe_div(cost_unit,t_cost)) if pd.notna(t_cost) else np.nan,(f"{safe_div(cost_unit,t_cost)-1:+.1%}".replace(".",",") if pd.notna(t_cost) else "sem meta"),"↑" if pd.notna(t_cost) and cost_unit>t_cost else "→"),
-        ("Horas extras",f"{overtime:,.0f} h".replace(",","."),f"{t_overtime:,.0f} h".replace(",",".") if pd.notna(t_overtime) else "Meta ausente",(1-safe_div(overtime,t_overtime)) if pd.notna(t_overtime) else np.nan,(f"{safe_div(overtime,t_overtime)-1:+.1%}".replace(".",",") if pd.notna(t_overtime) else "sem meta"),"↑" if pd.notna(t_overtime) and overtime>t_overtime else "→"),
+        ("Custo industrial/unidade",fmt_money(cost_unit,2),fmt_money(t_cost,2) if pd.notna(t_cost) else "Meta ausente",(1-safe_div(cost_unit,t_cost)) if pd.notna(t_cost) else np.nan,(f"{safe_div(cost_unit,t_cost)-1:+.1%}".replace(".",",") if pd.notna(t_cost) else "sem meta"),"↑" if pd.notna(t_cost) and cost_unit>t_cost else "→"),
+        ("Horas extras",
+         (f"{overtime:,.0f} h".replace(",",".") if people_scope_valid and pd.notna(overtime) else "N/A no recorte"),
+         f"{t_overtime:,.0f} h".replace(",",".") if pd.notna(t_overtime) else "Meta ausente",
+         ((1-safe_div(overtime,t_overtime)) if people_scope_valid and pd.notna(overtime) and pd.notna(t_overtime) else np.nan),
+         (f"{safe_div(overtime,t_overtime)-1:+.1%}".replace(".",",") if people_scope_valid and pd.notna(overtime) and pd.notna(t_overtime) else ("fonte sem granularidade" if not people_scope_valid else "sem meta")),
+         ("↑" if people_scope_valid and pd.notna(t_overtime) and pd.notna(overtime) and overtime>t_overtime else ("!" if not people_scope_valid else "→"))),
         ("Margem Industrial",fmt_pct(margin_contrib),fmt_pct(t_margin),safe_div(margin_contrib,t_margin)-1,f"{(margin_contrib-t_margin)*100:+.1f} pp".replace(".",","),"↓" if margin_contrib<t_margin else "↑"),
     ]
 
@@ -1114,7 +1150,7 @@ def calculate_real(data):
         ("EBITDA Industrial",fmt_money(ebitda),(safe_div(ebitda,t_ebitda)-1) if pd.notna(t_ebitda) else margin_score,(f"{safe_div(ebitda,t_ebitda)-1:+.1%} vs. meta".replace(".",",") if pd.notna(t_ebitda) else "meta financeira")),
         ("Produção",f"{actual:,.0f} un".replace(",","."),attainment-1,f"{attainment-1:+.1%} vs. meta".replace(".",",")),
         ("OEE",fmt_pct(oee),safe_div(oee,t_oee)-1,f"{(oee-t_oee)*100:+.1f} pp vs. meta".replace(".",",")),
-        ("Custo / un.",fmt_money(cost_unit,2),(1-safe_div(cost_unit,t_cost)) if pd.notna(t_cost) else np.nan,(f"{safe_div(cost_unit,t_cost)-1:+.1%} vs. meta".replace(".",",") if pd.notna(t_cost) else "meta não definida")),
+        ("Custo ind. / un.",fmt_money(cost_unit,2),(1-safe_div(cost_unit,t_cost)) if pd.notna(t_cost) else np.nan,(f"{safe_div(cost_unit,t_cost)-1:+.1%} vs. meta".replace(".",",") if pd.notna(t_cost) else "meta não definida")),
     ]
 
     # ---------------- Health: all KPIs count; finance increases relevance weight ----------------
@@ -1124,27 +1160,29 @@ def calculate_real(data):
         "Eficiência MOD":labor_gap_cost,
         "Refugo":loss_scrap,
         "OTIF":revenue*0.01,
-        "Custo/unidade":cost_gap,
+        "Custo industrial/unidade":cost_gap,
         "Horas extras":overtime_premium,
         "Margem Industrial":max(0,(t_margin-margin_contrib)*revenue)
     }
     max_rel=max([v for v in financial_relevance.values() if pd.notna(v)] + [1])
     health_rows=[]
     for ind,mes,meta,score,delta,tend in kpis:
+        applicable=not (ind in ["Eficiência MOD","Horas extras"] and not people_scope_valid)
         has_target=("Meta ausente" not in str(meta))
-        has_data=(mes not in ["—","Padrão ausente"])
-        pts=_status_points(score,has_target,has_data)
-        rel=max(0,financial_relevance.get(ind,0))
-        weight=1.0 + 2.0*(rel/max_rel)  # all KPIs count; financial relevance can triple weight
-        health_rows.append([ind,pts,weight,rel,has_target,has_data])
-    health_df=pd.DataFrame(health_rows,columns=["KPI","Score","Peso","Relevancia_R$","Tem_Meta","Tem_Dado"])
-    health_score=float(np.average(health_df["Score"],weights=health_df["Peso"]))
+        has_data=(mes not in ["—","Padrão ausente","N/A no recorte"])
+        pts=_status_points(score,has_target,has_data) if applicable else np.nan
+        rel=max(0,financial_relevance.get(ind,0)) if applicable else 0.0
+        weight=(1.0 + 2.0*(rel/max_rel)) if applicable else 0.0
+        health_rows.append([ind,pts,weight,rel,has_target,has_data,applicable])
+    health_df=pd.DataFrame(health_rows,columns=["KPI","Score","Peso","Relevancia_R$","Tem_Meta","Tem_Dado","Escopo_Aplicavel"])
+    valid_health=health_df[health_df["Peso"]>0]
+    health_score=float(np.average(valid_health["Score"],weights=valid_health["Peso"])) if not valid_health.empty else 0.0
 
-    financial_names=["Produção","Refugo","Custo/unidade","Horas extras","Margem Industrial","Eficiência MOD"]
-    hfin=health_df[health_df["KPI"].isin(financial_names)]
+    financial_names=["Produção","Refugo","Custo industrial/unidade","Horas extras","Margem Industrial","Eficiência MOD"]
+    hfin=health_df[(health_df["KPI"].isin(financial_names)) & (health_df["Peso"]>0)]
     financial_health=float(np.average(hfin["Score"],weights=hfin["Peso"])) if not hfin.empty else health_score
     operational_names=["Produção","OEE","Eficiência MOD","Refugo","OTIF"]
-    hop=health_df[health_df["KPI"].isin(operational_names)]
+    hop=health_df[(health_df["KPI"].isin(operational_names)) & (health_df["Peso"]>0)]
     operational_health=float(np.average(hop["Score"],weights=hop["Peso"])) if not hop.empty else health_score
 
     # ---------------- Diagnostic engine ----------------
@@ -1155,10 +1193,10 @@ def calculate_real(data):
     lever_impacts={
         "Disponibilidade":loss_prod*0.45,
         "Performance":loss_prod*0.25,
-        "Setup":loss_prod*0.12,
+        "Setup":loss_prod*0.12 if maintenance_scope_valid else 0.0,
         "Refugo":loss_scrap,
-        "Eficiência MOD":labor_gap_cost,
-        "Horas extras":overtime_premium,
+        "Eficiência MOD":labor_gap_cost if people_scope_valid else 0.0,
+        "Horas extras":overtime_premium if people_scope_valid else 0.0,
         "Consumo MP":cost_gap*0.70,
         "Energia":energy_gap,
         "Custo fixo":max(0,fixed_cost*0.03),
@@ -1193,6 +1231,7 @@ def calculate_real(data):
         "Alavanca","Impacto_R$","Esforco","Horizonte_dias","Responsavel","Resultado_0a100",
         "Indice_Prioridade","Prioridade","Acao"
     ]).sort_values(["Indice_Prioridade","Impacto_R$"],ascending=False)
+    diagnostic=diagnostic[diagnostic["Impacto_R$"]>0.5].reset_index(drop=True)
 
     top2=diagnostic.head(2)["Alavanca"].tolist()
     conclusion=(
@@ -1204,7 +1243,14 @@ def calculate_real(data):
     if top_cause is not None:
         conclusion += f"A principal causa de parada é {top_cause['Causa']} ({top_cause['Horas']:.0f} h). "
     if top2:
-        conclusion += "As alavancas a priorizar são " + " e ".join(top2) + "."
+        conclusion += "As alavancas a priorizar são " + " e ".join(top2) + ". "
+    scope_notes=[]
+    if not maintenance_scope_valid:
+        scope_notes.append("Manutenção não possui a granularidade do recorte; causas de parada não são atribuídas.")
+    if not people_scope_valid:
+        scope_notes.append("Pessoas não possui a granularidade do recorte; eficiência MOD e horas extras ficam fora do score.")
+    if scope_notes:
+        conclusion += " ".join(scope_notes)
 
     return {
         "cards":cards,"kpis":kpis,"trend":trend,"line_perf":line_perf,"causes":causes,
@@ -1238,6 +1284,7 @@ def calculate_real(data):
         "inventory_days":inventory_days,"dpo_days":dpo_days,"dso_days":dso_days,
         "labor_efficiency":labor_eff,"std_hours_earned":std_hours_earned,"actual_hh":actual_hh,
         "standards_missing":standards_missing,
+        "maintenance_scope_valid":maintenance_scope_valid,"people_scope_valid":people_scope_valid,
         "health_score":health_score,"financial_health":financial_health,"operational_health":operational_health,
         "health_details":health_df,
         "diagnostic":diagnostic,"diagnostic_conclusion":conclusion
@@ -1267,7 +1314,7 @@ def demo_dataset():
         ("EBITDA Industrial","R$ 1,9 mi",-0.208,"-20,8% vs. meta"),
         ("Produção","41.250 un",-0.083,"-8,3% vs. meta"),
         ("OEE","71,4%",-0.0846,"-6,6 pp vs. meta"),
-        ("Custo / un.","R$ 18,42",-0.077,"+7,7% vs. meta"),
+        ("Custo ind. / un.","R$ 208,00",-0.046,"+4,6% vs. meta"),
     ]
     kpis=[
         ("Produção","41.250 un","45.000",-0.083,"-8,3%","↓"),
@@ -1275,7 +1322,7 @@ def demo_dataset():
         ("Eficiência MOD","89,8%","95%",-0.055,"-5,2 pp","↓"),
         ("Refugo","3,8%","2,5%",-0.52,"+1,3 pp","↑"),
         ("OTIF","89%","95%",-0.063,"-6 pp","↓"),
-        ("Custo/unidade","R$ 18,42","R$ 17,10",-0.077,"+7,7%","↑"),
+        ("Custo industrial/unidade","R$ 208,00","R$ 198,84",-0.046,"+4,6%","↑"),
         ("Horas extras","1.280 h","900 h",-0.422,"+42%","↑"),
         ("Margem Industrial","27,8%","31%",-0.103,"-3,2 pp","↓"),
     ]
@@ -1305,7 +1352,7 @@ def demo_dataset():
         ["Eficiência MOD",72,1.8,84000,True,True],
         ["Refugo",20,2.0,110000,True,True],
         ["OTIF",70,1.2,50000,True,True],
-        ["Custo/unidade",68,1.6,95000,True,True],
+        ["Custo industrial/unidade",82,1.6,95000,True,True],
         ["Horas extras",0,1.5,75000,True,True],
         ["Margem Industrial",50,2.2,397000,True,True],
     ],columns=["KPI","Score","Peso","Relevancia_R$","Tem_Meta","Tem_Dado"])
@@ -1332,7 +1379,7 @@ def demo_dataset():
         "ebitda":1900000,"revenue":12400000,"revenue_gross":13200000,"deductions":800000,
         "actual":41250,"planned":45000,"sold_volume":41250,
         "availability":.748,"performance":.945,"quality":.981,
-        "cost_unit":18.42,"overtime":1280,"productivity":18.2,
+        "cost_unit":208.00,"overtime":1280,"productivity":18.2,
         "rework_rate":.042,"mttr_min":95.0,"setup_avg_min":48.0,"unplanned_downtime_h":112.0,
         "avg_headcount":118,
         "cost_mp":5191000.0,"cost_mod":1611000.0,"cost_freight":553000.0,
@@ -1988,10 +2035,20 @@ def _analytics_prepare_state(data):
         st.session_state.af_plant="Todas"
         st.session_state.af_line="Todas"
         st.session_state.af_product="Todos"
+        st.session_state.pop("analytics_last_valid_data",None)
+        st.session_state.pop("analytics_last_valid_D",None)
         if opts.get("date_min") is not None and opts.get("date_max") is not None:
             st.session_state.af_period=(opts["date_min"].date(),opts["date_max"].date())
         else:
             st.session_state.af_period=()
+
+    # The date-range widget must never start blank when the imported dataset has dates.
+    if opts.get("date_min") is not None and opts.get("date_max") is not None:
+        period=st.session_state.get("af_period")
+        valid_period=isinstance(period,(tuple,list)) and len(period)>=2 and period[0] is not None and period[1] is not None
+        if not valid_period:
+            st.session_state.af_period=(opts["date_min"].date(),opts["date_max"].date())
+
     st.session_state.analytics_filter_options=opts
     return opts
 
@@ -2034,6 +2091,10 @@ def page_header(title, subtitle):
             dmin=opts.get("date_min")
             dmax=opts.get("date_max")
             if dmin is not None and dmax is not None:
+                period=st.session_state.get("af_period")
+                valid_period=isinstance(period,(tuple,list)) and len(period)>=2 and period[0] is not None and period[1] is not None
+                if not valid_period:
+                    st.session_state.af_period=(dmin.date(),dmax.date())
                 st.date_input(
                     "Período",key="af_period",
                     min_value=dmin.date(),max_value=dmax.date(),
@@ -2042,8 +2103,15 @@ def page_header(title, subtitle):
             else:
                 st.caption("Período não disponível")
         with c6:
-            context=ae.filter_context_label(_analytics_filters_from_state())
-            badge="Dados filtrados" if context!="Todos os dados" else "Dados importados"
+            current_filters=_analytics_filters_from_state()
+            non_period_active=any(current_filters.get(k) not in (None,"","Todos","Todas") for k in ["grupo","planta","linha","produto"])
+            period_restricted=False
+            if dmin is not None and dmax is not None and current_filters.get("start") is not None and current_filters.get("end") is not None:
+                period_restricted=(
+                    pd.Timestamp(current_filters["start"]).date()!=dmin.date()
+                    or pd.Timestamp(current_filters["end"]).date()!=dmax.date()
+                )
+            badge="Dados filtrados" if (non_period_active or period_restricted) else "Dados importados"
             st.markdown(f'<div style="text-align:right;padding-top:.2rem"><span class="data-badge">{badge}</span></div>',unsafe_allow_html=True)
     else:
         c1,c2,c3,c4,c5=st.columns([1,1,1,1,1.35],gap="small")
@@ -2065,7 +2133,7 @@ def page_header(title, subtitle):
 
 
 def admin_header(title, subtitle):
-    st.markdown('<div class="eyebrow">INDUSTRIAL DATA + ANALYTICS · v0.6.4</div>', unsafe_allow_html=True)
+    st.markdown('<div class="eyebrow">INDUSTRIAL DATA + ANALYTICS · v0.6.4.1</div>', unsafe_allow_html=True)
     st.markdown(f'<div class="page-title">{title}</div>', unsafe_allow_html=True)
     st.markdown(f'<div class="page-subtitle">{subtitle}</div>', unsafe_allow_html=True)
 
@@ -2582,11 +2650,15 @@ ACTIVE_FILTERS=_analytics_filters_from_state()
 FILTERED_DATA, FILTER_META=ae.apply_filters(st.session_state.real_data,ACTIVE_FILTERS)
 if st.session_state.real_data:
     if FILTER_META.get("empty"):
-        ACTIVE_DATA=st.session_state.real_data
-        D=calculate_real(ACTIVE_DATA)
+        ACTIVE_DATA=st.session_state.get("analytics_last_valid_data",st.session_state.real_data)
+        D=st.session_state.get("analytics_last_valid_D")
+        if D is None:
+            D=calculate_real(ACTIVE_DATA,None)
     else:
         ACTIVE_DATA=FILTERED_DATA
-        D=calculate_real(ACTIVE_DATA)
+        D=calculate_real(ACTIVE_DATA,FILTER_META)
+        st.session_state.analytics_last_valid_data=ACTIVE_DATA
+        st.session_state.analytics_last_valid_D=D
 else:
     ACTIVE_DATA=None
     D=demo_dataset()
@@ -2865,7 +2937,7 @@ elif page == "Performance Operacional":
     with st.container(border=True):
         panel_title("Drill-down de Performance","KPI → Linha → Máquina → Causa, preservando o recorte dos filtros globais")
 
-        kpi_options=["OEE","Disponibilidade","Produção","Refugo","Horas extras","Custo/unidade"]
+        kpi_options=["OEE","Disponibilidade","Produção","Refugo","Horas extras","Custo industrial/unidade"]
         line_options=["Todas"] + (lp["Linha"].astype(str).tolist() if not lp.empty else [])
         c1,c2,c3,c4=st.columns([.9,1,1,1.1],gap="small")
 
@@ -2964,7 +3036,7 @@ elif page == "Performance Operacional":
             else:
                 st.info("Drill-down de Pessoas disponível após importação.")
 
-        elif drill_kpi=="Custo/unidade":
+        elif drill_kpi=="Custo industrial/unidade":
             if ACTIVE_DATA and "custos" in ACTIVE_DATA:
                 cc=ACTIVE_DATA["custos"].copy()
                 if not cc.empty:
