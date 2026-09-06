@@ -22,7 +22,7 @@ except Exception:  # pragma: no cover - fallback for static/offline validation
     duckdb = None
 
 
-DATA_LAYER_VERSION = "0.6.4"
+DATA_LAYER_VERSION = "0.6.5"
 IGNORE_ENTITY = "Ignorar"
 AUTO_UNIT = "Auto"
 NO_CONVERSION = "Sem conversão"
@@ -52,6 +52,7 @@ ENTITY_LABELS: Dict[str, str] = {
     "responsaveis": "Responsáveis",
     "alavancas_simulador": "Alavancas do Simulador",
     "premissas_simulador": "Premissas do Simulador",
+    "cadastro_dimensoes": "Cadastro de Dimensões",
 }
 
 LABEL_TO_ENTITY = {v: k for k, v in ENTITY_LABELS.items()}
@@ -70,6 +71,7 @@ SHEET_ALIASES: Dict[str, List[str]] = {
     "responsaveis": ["responsaveis", "responsáveis", "owners", "responsibles"],
     "alavancas_simulador": ["alavancas_simulador", "simulator_levers", "alavancas"],
     "premissas_simulador": ["premissas_simulador", "simulator_assumptions", "premissas"],
+    "cadastro_dimensoes": ["cadastro_dimensoes", "cadastro dimensoes", "cadastro_linhas", "cadastro maquinas", "master_data", "master data", "hierarquia_industrial", "dimensoes", "dimensões"],
 }
 
 # Canonical schema. priority: required | recommended | optional
@@ -78,7 +80,7 @@ FIELD_SPECS: Dict[str, Dict[str, Dict[str, Any]]] = {
     "producao": {
         "grupo": {"label": "Grupo", "priority": "optional", "dtype": "text", "aliases": ["grupo", "grupo_empresa", "grupo_industrial", "business_group"]},
         "data": {"label": "Data", "priority": "required", "dtype": "date", "aliases": ["data", "date", "dt", "dt_producao", "data_ref", "data_producao"]},
-        "fabrica": {"label": "Fábrica / Planta", "priority": "recommended", "dtype": "text", "aliases": ["fabrica", "planta", "unidade", "site", "factory"]},
+        "fabrica": {"label": "Fábrica / Planta", "priority": "recommended", "dtype": "text", "aliases": ["fabrica", "planta", "site", "factory", "unidade_fabril", "unidade_industrial", "plant"]},
         "linha": {"label": "Linha", "priority": "required", "dtype": "text", "aliases": ["linha", "line", "workcenter", "work_center", "centro_trabalho", "celula", "célula", "recurso"]},
         "produto": {"label": "Produto / SKU", "priority": "required", "dtype": "text", "aliases": ["produto", "sku", "product", "material", "item", "codigo_produto", "cod_produto"]},
         "planejado": {"label": "Produção Planejada", "priority": "required", "dtype": "number", "unit": "unidades", "aliases": ["planejado", "plano", "meta_producao", "planned", "qtd_prevista", "quantidade_planejada", "target_qty", "planned_qty"]},
@@ -90,7 +92,7 @@ FIELD_SPECS: Dict[str, Dict[str, Dict[str, Any]]] = {
     },
     "qualidade": {
         "grupo": {"label": "Grupo", "priority": "optional", "dtype": "text", "aliases": ["grupo", "grupo_empresa", "grupo_industrial", "business_group"]},
-        "fabrica": {"label": "Fábrica / Planta", "priority": "optional", "dtype": "text", "aliases": ["fabrica", "planta", "unidade", "site", "factory"]},
+        "fabrica": {"label": "Fábrica / Planta", "priority": "optional", "dtype": "text", "aliases": ["fabrica", "planta", "site", "factory", "unidade_fabril", "unidade_industrial", "plant"]},
         "data": {"label": "Data", "priority": "required", "dtype": "date", "aliases": ["data", "date", "dt", "data_qualidade"]},
         "linha": {"label": "Linha", "priority": "required", "dtype": "text", "aliases": ["linha", "line", "workcenter", "centro_trabalho", "celula"]},
         "produto": {"label": "Produto / SKU", "priority": "required", "dtype": "text", "aliases": ["produto", "sku", "product", "material", "item"]},
@@ -101,7 +103,7 @@ FIELD_SPECS: Dict[str, Dict[str, Dict[str, Any]]] = {
     },
     "manutencao": {
         "grupo": {"label": "Grupo", "priority": "optional", "dtype": "text", "aliases": ["grupo", "grupo_empresa", "grupo_industrial", "business_group"]},
-        "fabrica": {"label": "Fábrica / Planta", "priority": "optional", "dtype": "text", "aliases": ["fabrica", "planta", "unidade", "site", "factory"]},
+        "fabrica": {"label": "Fábrica / Planta", "priority": "optional", "dtype": "text", "aliases": ["fabrica", "planta", "site", "factory", "unidade_fabril", "unidade_industrial", "plant"]},
         "data": {"label": "Data", "priority": "required", "dtype": "date", "aliases": ["data", "date", "dt", "data_parada"]},
         "linha": {"label": "Linha", "priority": "required", "dtype": "text", "aliases": ["linha", "line", "workcenter", "centro_trabalho"]},
         "maquina": {"label": "Máquina / Equipamento", "priority": "required", "dtype": "text", "aliases": ["maquina", "equipamento", "machine", "equipment", "asset", "recurso"]},
@@ -111,7 +113,7 @@ FIELD_SPECS: Dict[str, Dict[str, Dict[str, Any]]] = {
     },
     "pessoas": {
         "grupo": {"label": "Grupo", "priority": "optional", "dtype": "text", "aliases": ["grupo", "grupo_empresa", "grupo_industrial", "business_group"]},
-        "fabrica": {"label": "Fábrica / Planta", "priority": "optional", "dtype": "text", "aliases": ["fabrica", "planta", "unidade", "site", "factory"]},
+        "fabrica": {"label": "Fábrica / Planta", "priority": "optional", "dtype": "text", "aliases": ["fabrica", "planta", "site", "factory", "unidade_fabril", "unidade_industrial", "plant"]},
         "data": {"label": "Data", "priority": "required", "dtype": "date", "aliases": ["data", "date", "dt"]},
         "linha": {"label": "Linha", "priority": "required", "dtype": "text", "aliases": ["linha", "line", "workcenter", "centro_trabalho"]},
         "turno": {"label": "Turno", "priority": "recommended", "dtype": "text", "aliases": ["turno", "shift", "turma"]},
@@ -121,7 +123,7 @@ FIELD_SPECS: Dict[str, Dict[str, Dict[str, Any]]] = {
     },
     "custos": {
         "grupo": {"label": "Grupo", "priority": "optional", "dtype": "text", "aliases": ["grupo", "grupo_empresa", "grupo_industrial", "business_group"]},
-        "fabrica": {"label": "Fábrica / Planta", "priority": "optional", "dtype": "text", "aliases": ["fabrica", "planta", "unidade", "site", "factory"]},
+        "fabrica": {"label": "Fábrica / Planta", "priority": "optional", "dtype": "text", "aliases": ["fabrica", "planta", "site", "factory", "unidade_fabril", "unidade_industrial", "plant"]},
         "data": {"label": "Data", "priority": "required", "dtype": "date", "aliases": ["data", "date", "dt", "competencia"]},
         "linha": {"label": "Linha", "priority": "required", "dtype": "text", "aliases": ["linha", "line", "workcenter", "centro_custo", "cost_center"]},
         "produto": {"label": "Produto / SKU", "priority": "recommended", "dtype": "text", "aliases": ["produto", "sku", "product", "material", "item"]},
@@ -169,6 +171,15 @@ FIELD_SPECS: Dict[str, Dict[str, Dict[str, Any]]] = {
         "comportamento_default": {"label": "Comportamento Default", "priority": "recommended", "dtype": "text", "aliases": ["comportamento_default", "default_behavior"]},
         "inclui_ebitda": {"label": "Inclui EBITDA", "priority": "recommended", "dtype": "text", "aliases": ["inclui_ebitda", "included_in_ebitda"]},
         "observacao": {"label": "Observação", "priority": "optional", "dtype": "text", "aliases": ["observacao", "observação", "notes"]},
+    },
+    "cadastro_dimensoes": {
+        "grupo": {"label": "Grupo", "priority": "optional", "dtype": "text", "aliases": ["grupo", "grupo_empresa", "grupo_industrial", "business_group"]},
+        "fabrica": {"label": "Fábrica / Planta", "priority": "recommended", "dtype": "text", "aliases": ["fabrica", "planta", "site", "factory", "unidade_fabril", "unidade_industrial", "plant"]},
+        "linha": {"label": "Linha", "priority": "recommended", "dtype": "text", "aliases": ["linha", "line", "workcenter", "centro_trabalho", "celula", "célula"]},
+        "maquina": {"label": "Máquina / Equipamento", "priority": "optional", "dtype": "text", "aliases": ["maquina", "equipamento", "machine", "equipment", "asset"]},
+        "produto": {"label": "Produto / SKU", "priority": "optional", "dtype": "text", "aliases": ["produto", "sku", "product", "material", "item"]},
+        "familia": {"label": "Família de Produto", "priority": "optional", "dtype": "text", "aliases": ["familia", "família", "product_family", "family"]},
+        "centro_custo": {"label": "Centro de Custo", "priority": "optional", "dtype": "text", "aliases": ["centro_custo", "cost_center", "ccusto", "cc"]},
     },
     "metas": {
         "indicador": {"label": "Indicador", "priority": "required", "dtype": "text", "aliases": ["indicador", "kpi", "metric"]},
@@ -241,7 +252,7 @@ CORE_APPLY_REQUIREMENTS: Dict[str, List[str]] = {
 }
 
 DIMENSION_FIELDS = {
-    "grupo", "fabrica", "planta", "linha", "produto", "maquina", "turno", "causa", "tipo_parada", "familia", "linha_padrao", "indicador", "area", "responsavel"
+    "grupo", "fabrica", "planta", "linha", "produto", "maquina", "turno", "causa", "tipo_parada", "familia", "linha_padrao", "indicador", "area", "responsavel", "centro_custo"
 }
 
 UNIT_OPTIONS = [AUTO_UNIT, NO_CONVERSION, "segundos", "minutos", "horas", "kg", "toneladas", "unidades", "R$", "R$ mil", "% (0-100)", "decimal (0-1)"]
@@ -351,12 +362,459 @@ def workbook_fingerprint(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+
+# ---------------------------------------------------------------------------
+# v0.6.5 — Smart sheet reading + semantic context
+# ---------------------------------------------------------------------------
+
+HEADER_SCAN_ROWS = 18
+
+def _all_alias_keys() -> set[str]:
+    keys=set()
+    for entity,fields in FIELD_SPECS.items():
+        for field,spec in fields.items():
+            keys.add(norm(field))
+            keys.add(norm(spec.get("label","")))
+            for alias in spec.get("aliases",[]):
+                keys.add(norm(alias))
+    for entity,aliases in SHEET_ALIASES.items():
+        keys.add(norm(entity))
+        for alias in aliases:
+            keys.add(norm(alias))
+    return {k for k in keys if k}
+
+_HEADER_ALIAS_KEYS=_all_alias_keys()
+
+
+def _header_row_score(values: List[Any]) -> float:
+    cleaned=[str(v).strip() for v in values if pd.notna(v) and str(v).strip() and str(v).strip().lower()!="nan"]
+    if len(cleaned)<2:
+        return -10.0
+    norms=[norm(v) for v in cleaned]
+    alias_hits=sum(1 for v in norms if v in _HEADER_ALIAS_KEYS)
+    fuzzy_hits=0
+    for v in norms:
+        if v in _HEADER_ALIAS_KEYS:
+            continue
+        if any(_similarity(v,a)>=0.90 for a in _HEADER_ALIAS_KEYS):
+            fuzzy_hits+=1
+    numericish=sum(1 for v in cleaned if re.fullmatch(r"[-+]?[\d.,%$Rr\s]+",v) is not None)
+    long_text=sum(1 for v in cleaned if len(v)>55)
+    unique_ratio=len(set(norms))/max(1,len(norms))
+    return (
+        alias_hits*5.0 + fuzzy_hits*2.5 + min(len(cleaned),14)*0.25 +
+        unique_ratio*1.4 - numericish*0.35 - long_text*0.45
+    )
+
+
+def smart_read_sheet(raw: bytes, sheet_name: str, max_header_rows: int = HEADER_SCAN_ROWS) -> Tuple[pd.DataFrame, Dict[str,Any]]:
+    """
+    Read semi-structured Excel sheets without assuming row 1 is the header.
+    Returns a clean DataFrame and metadata describing the detected header/context.
+    """
+    preview=pd.read_excel(BytesIO(raw),sheet_name=sheet_name,header=None,nrows=max_header_rows)
+    if preview.empty:
+        return pd.DataFrame(), {"header_row":0,"confidence":0.0,"context_lines":[],"context_text":""}
+
+    scores=[]
+    for idx,row in preview.iterrows():
+        scores.append((int(idx),_header_row_score(row.tolist())))
+    best_idx,best_score=max(scores,key=lambda x:x[1])
+    row0_score=dict(scores).get(0,-10.0)
+
+    # Prefer row 0 when it is already a strong header; otherwise accept later row.
+    header_idx=0 if row0_score>=best_score-1.0 and row0_score>=5.0 else best_idx
+    confidence=float(np.clip((dict(scores).get(header_idx,0)+2)/18,0.35,0.99))
+
+    df=pd.read_excel(BytesIO(raw),sheet_name=sheet_name,header=header_idx)
+    df=df.dropna(axis=1,how="all").dropna(axis=0,how="all").reset_index(drop=True)
+    df.columns=[
+        str(c).strip() if str(c).strip() and not str(c).lower().startswith("unnamed") else f"coluna_{i+1}"
+        for i,c in enumerate(df.columns)
+    ]
+
+    context_lines=[]
+    if header_idx>0:
+        raw_context=pd.read_excel(BytesIO(raw),sheet_name=sheet_name,header=None,nrows=header_idx)
+        for _,r in raw_context.iterrows():
+            vals=[str(v).strip() for v in r.tolist() if pd.notna(v) and str(v).strip() and str(v).strip().lower()!="nan"]
+            if vals:
+                context_lines.append(" | ".join(vals))
+    return df,{
+        "header_row":int(header_idx),
+        "confidence":round(confidence,4),
+        "context_lines":context_lines,
+        "context_text":" ; ".join(context_lines),
+        "header_score":round(float(dict(scores).get(header_idx,0)),3),
+    }
+
+
+_MONTH_WORDS={
+    "jan","janeiro","feb","fev","fevereiro","mar","marco","março","apr","abr","abril",
+    "may","mai","maio","jun","junho","jul","julho","aug","ago","agosto","sep","set","setembro",
+    "oct","out","outubro","nov","novembro","dec","dez","dezembro"
+}
+
+
+def _clean_context_value(value: str, dimension: str) -> str:
+    s=str(value or "").strip(" _-–—:;|")
+    s=re.sub(r"\.(xlsx|xls|csv)$","",s,flags=re.I)
+    # Remove obvious period/file descriptors.
+    parts=[p for p in re.split(r"[\s_\-]+",s) if p]
+    parts=[p for p in parts if norm(p) not in _MONTH_WORDS and not re.fullmatch(r"20\d{2}",p)]
+    s=" ".join(parts).strip()
+    if dimension=="fabrica":
+        s=re.sub(r"^(planta|fabrica|fábrica|factory|site|unidade\s+(fabril|industrial))\s*[:\-]?\s*","",s,flags=re.I).strip()
+        if s and not norm(s).startswith(("planta_","fabrica_")):
+            s=f"Planta {s}"
+    return s
+
+
+def infer_context_from_text(text: str, dimension: str) -> Optional[str]:
+    text=str(text or "").strip()
+    if not text:
+        return None
+    if dimension=="fabrica":
+        patterns=[
+            r"(?:planta|f[aá]brica|factory|site|unidade\s+(?:fabril|industrial))\s*[:=\-–|]\s*([A-Za-zÀ-ÿ0-9][A-Za-zÀ-ÿ0-9 ._/\\-]{1,45})",
+        ]
+    elif dimension=="grupo":
+        patterns=[
+            r"(?:grupo|group|holding)\s*[:=\-–|]\s*([A-Za-zÀ-ÿ0-9][A-Za-zÀ-ÿ0-9 ._/\\-]{1,55})",
+        ]
+    else:
+        return None
+    for pat in patterns:
+        m=re.search(pat,text,flags=re.I)
+        if m:
+            val=_clean_context_value(m.group(1),dimension)
+            if val:
+                return val
+    return None
+
+
+def infer_sheet_semantic_context(filename: str, sheet_name: str, context_text: str, entity: Optional[str]) -> Dict[str,Any]:
+    """Infer contextual dimensions from preamble, sheet name and file name."""
+    candidates={}
+    evidences=[
+        ("cabeçalho/contexto",context_text,0.94),
+        ("nome da aba",sheet_name,0.80),
+        ("nome do arquivo",filename,0.74),
+    ]
+    for dim in ["grupo","fabrica"]:
+        for source,text,conf in evidences:
+            value=infer_context_from_text(text,dim)
+            if value:
+                candidates[dim]={"value":value,"confidence":conf,"source":source}
+                break
+
+    # If sheet contains entity + a remaining location token, use as low-confidence plant context.
+    if "fabrica" not in candidates and entity:
+        n=norm(sheet_name)
+        aliases=[norm(entity)]+[norm(a) for a in SHEET_ALIASES.get(entity,[])]
+        remainder=n
+        for alias in sorted(aliases,key=len,reverse=True):
+            if alias and alias in remainder:
+                remainder=remainder.replace(alias,"_")
+        tokens=[t for t in remainder.split("_") if t and t not in _MONTH_WORDS and not re.fullmatch(r"20\d{2}",t)]
+        if tokens:
+            raw=" ".join(tokens)
+            if len(raw)>=3:
+                candidates["fabrica"]={"value":_clean_context_value(raw,"fabrica"),"confidence":0.68,"source":"nome da aba (inferido)"}
+    return candidates
+
+
+def _dimension_key(value: Any, dimension: str) -> str:
+    n=norm(value)
+    if not n:
+        return ""
+    prefixes={
+        "fabrica":["planta","fabrica","factory","site","unidade_fabril","unidade_industrial"],
+        "linha":["linha","line","celula","cell"],
+        "maquina":["maquina","machine","equipamento","equipment"],
+        "produto":["produto","product","sku","item"],
+        "grupo":["grupo","group","holding"],
+    }
+    parts=n.split("_")
+    while parts and "_".join(parts[:2]) in prefixes.get(dimension,[]):
+        parts=parts[2:]
+    if parts and parts[0] in prefixes.get(dimension,[]):
+        parts=parts[1:]
+    key="_".join(parts)
+    if dimension=="linha":
+        key=re.sub(r"^l(?=\d)","",key)
+        key=re.sub(r"^0+(?=\d)","",key)
+    return key or n
+
+
+def _canonical_display(values: List[str], dimension: str) -> str:
+    vals=[str(v).strip() for v in values if pd.notna(v) and str(v).strip()]
+    if not vals:
+        return ""
+    # Prefer most frequent; for plants prefer explicit "Planta ..." naming.
+    counts=pd.Series(vals).value_counts()
+    if dimension=="fabrica":
+        plant_vals=[v for v in counts.index if norm(v).startswith("planta_")]
+        if plant_vals:
+            return str(max(plant_vals,key=lambda v:(counts[v],len(v))))
+    return str(max(counts.index,key=lambda v:(counts[v],len(v))))
+
+
+def canonicalize_dimensions(standard: Dict[str,pd.DataFrame], mapping: Dict[str,Any]) -> Tuple[Dict[str,pd.DataFrame],List[Dict[str,Any]]]:
+    """Unify synonymous dimension values across entities (e.g. Fábrica SP / Planta SP)."""
+    lineage=[]
+    dim_fields={
+        "grupo":["grupo"],
+        "fabrica":["fabrica","planta"],
+        "linha":["linha"],
+        "maquina":["maquina"],
+        "produto":["produto"],
+    }
+    buckets={d:{} for d in dim_fields}
+    for entity,df in standard.items():
+        if df is None or df.empty:
+            continue
+        for dim,fields in dim_fields.items():
+            for field in fields:
+                if field not in df.columns:
+                    continue
+                for v in df[field].dropna().astype(str):
+                    if not v.strip():
+                        continue
+                    key=_dimension_key(v,dim)
+                    if key:
+                        buckets[dim].setdefault(key,[]).append(v)
+
+    canonical={}
+    for dim,groups in buckets.items():
+        canonical[dim]={k:_canonical_display(vals,dim) for k,vals in groups.items()}
+
+    for entity,df in standard.items():
+        if df is None or df.empty:
+            continue
+        out=df.copy()
+        for dim,fields in dim_fields.items():
+            for field in fields:
+                if field not in out.columns:
+                    continue
+                before=out[field].copy()
+                out[field]=out[field].map(
+                    lambda v: (
+                        _clean_context_value(canonical[dim].get(_dimension_key(v,dim),v),"fabrica")
+                        if dim=="fabrica"
+                        else canonical[dim].get(_dimension_key(v,dim),v)
+                    ) if pd.notna(v) and str(v).strip() else v
+                )
+                changed=((before.astype(str)!=out[field].astype(str)) & before.notna()).sum()
+                if changed:
+                    lineage.append({
+                        "entidade":entity,"campo_padrao":field,"aba_origem":"semantic",
+                        "coluna_origem":field,"unidade_origem":None,"unidade_destino":None,
+                        "confianca":0.96,"transformacao":f"canonicalização semântica de {dim}: {int(changed)} valor(es)"
+                    })
+        standard[entity]=out
+    mapping["semantic_canonical_values"]=canonical
+    return standard,lineage
+
+
+def _unique_relationship(df: pd.DataFrame, key_col: str, value_col: str) -> Dict[str,str]:
+    if df is None or df.empty or key_col not in df.columns or value_col not in df.columns:
+        return {}
+    tmp=df[[key_col,value_col]].dropna().copy()
+    tmp=tmp[(tmp[key_col].astype(str).str.strip()!="") & (tmp[value_col].astype(str).str.strip()!="")]
+    if tmp.empty:
+        return {}
+    rel={}
+    for key,g in tmp.groupby(key_col):
+        vals=g[value_col].astype(str).drop_duplicates().tolist()
+        if len(vals)==1:
+            rel[str(key)]=vals[0]
+    return rel
+
+
+def build_relationship_catalog(standard: Dict[str,pd.DataFrame]) -> Dict[str,Dict[str,str]]:
+    """Build only unambiguous relationships; never guess many-to-many relationships."""
+    combined=[]
+    for entity,df in standard.items():
+        if df is None or df.empty:
+            continue
+        temp=df.copy()
+        if "planta" in temp.columns and "fabrica" not in temp.columns:
+            temp["fabrica"]=temp["planta"]
+        cols=[c for c in ["grupo","fabrica","linha","maquina","produto"] if c in temp.columns]
+        if cols:
+            combined.append(temp[cols])
+    all_df=pd.concat(combined,ignore_index=True,sort=False) if combined else pd.DataFrame()
+
+    rel={
+        "linha_to_fabrica":_unique_relationship(all_df,"linha","fabrica"),
+        "maquina_to_linha":_unique_relationship(all_df,"maquina","linha"),
+        "maquina_to_fabrica":_unique_relationship(all_df,"maquina","fabrica"),
+        "produto_to_fabrica":_unique_relationship(all_df,"produto","fabrica"),
+        "fabrica_to_grupo":_unique_relationship(all_df,"fabrica","grupo"),
+        "linha_to_grupo":_unique_relationship(all_df,"linha","grupo"),
+    }
+    return rel
+
+
+def semantic_enrich_standard(
+    standard: Dict[str,pd.DataFrame],
+    mapping: Dict[str,Any],
+) -> Tuple[Dict[str,pd.DataFrame],List[Dict[str,Any]],pd.DataFrame]:
+    """
+    Resolve missing Group/Plant/Line using explicit data, sheet/file context and
+    cross-table relationships. It never fills a dimension when the relationship is ambiguous.
+    """
+    standard,canon_lineage=canonicalize_dimensions(standard,mapping)
+    lineage=list(canon_lineage)
+    report_rows=[]
+
+    learned_relationships=mapping.get("semantic_relationships",{}) if isinstance(mapping.get("semantic_relationships",{}),dict) else {}
+
+    def _merged_relationships(current):
+        merged={k:dict(v) for k,v in current.items()}
+        for rel_name,rel_map in learned_relationships.items():
+            if not isinstance(rel_map,dict):
+                continue
+            merged.setdefault(rel_name,{})
+            # Current-file evidence wins; learned mapping only fills missing keys.
+            for key,value in rel_map.items():
+                merged[rel_name].setdefault(str(key),value)
+        return merged
+
+    relationships=_merged_relationships(build_relationship_catalog(standard))
+
+    # Two passes allow master data / explicit relationships to propagate.
+    for pass_no in [1,2]:
+        for entity,df in list(standard.items()):
+            if df is None or df.empty:
+                continue
+            out=df.copy()
+            source_sheet=out["_source_sheet"] if "_source_sheet" in out.columns else pd.Series([""]*len(out),index=out.index)
+
+            plant_field="planta" if entity=="dre_gerencial" else ("fabrica" if "fabrica" in FIELD_SPECS.get(entity,{}) else None)
+            if plant_field and plant_field not in out.columns:
+                out[plant_field]=pd.Series(pd.NA,index=out.index,dtype="string")
+            if "grupo" in FIELD_SPECS.get(entity,{}) and "grupo" not in out.columns:
+                out["grupo"]=pd.Series(pd.NA,index=out.index,dtype="string")
+            if "linha" in FIELD_SPECS.get(entity,{}) and "linha" not in out.columns:
+                out["linha"]=pd.Series(pd.NA,index=out.index,dtype="string")
+
+            # Line from machine relationship.
+            if "linha" in out.columns and "maquina" in out.columns:
+                missing=out["linha"].isna() | out["linha"].astype(str).str.strip().isin(["","<NA>","nan"])
+                inferred=out["maquina"].astype(str).map(relationships.get("maquina_to_linha",{}))
+                fill=missing & inferred.notna()
+                if fill.any():
+                    out.loc[fill,"linha"]=inferred[fill]
+                    report_rows.append([entity,"Linha",int(fill.sum()),"relação Máquina → Linha",0.98,"Resolvido"])
+
+            # Plant from line, machine, product, then sheet context.
+            if plant_field:
+                missing=out[plant_field].isna() | out[plant_field].astype(str).str.strip().isin(["","<NA>","nan"])
+                candidates=[
+                    ("relação Linha → Planta","linha",relationships.get("linha_to_fabrica",{}),0.98),
+                    ("relação Máquina → Planta","maquina",relationships.get("maquina_to_fabrica",{}),0.98),
+                    ("relação Produto → Planta","produto",relationships.get("produto_to_fabrica",{}),0.90),
+                ]
+                for method,keycol,relmap,conf in candidates:
+                    if keycol in out.columns and missing.any():
+                        inferred=out[keycol].astype(str).map(relmap)
+                        fill=missing & inferred.notna()
+                        if fill.any():
+                            out.loc[fill,plant_field]=inferred[fill]
+                            report_rows.append([entity,"Planta",int(fill.sum()),method,conf,"Resolvido"])
+                            missing=out[plant_field].isna() | out[plant_field].astype(str).str.strip().isin(["","<NA>","nan"])
+                if missing.any():
+                    context_map=mapping.get("semantic_context",{})
+                    ctx=source_sheet.map(
+                        lambda sh: (context_map.get(str(sh),{}).get("fabrica") or {}).get("value")
+                    )
+                    ctx_conf=source_sheet.map(
+                        lambda sh: (context_map.get(str(sh),{}).get("fabrica") or {}).get("confidence",0.0)
+                    )
+                    fill=missing & ctx.notna() & (ctx.astype(str).str.strip()!="") & (ctx_conf>=0.68)
+                    if fill.any():
+                        out.loc[fill,plant_field]=ctx[fill]
+                        report_rows.append([entity,"Planta",int(fill.sum()),"contexto de arquivo/aba/cabeçalho",float(ctx_conf[fill].mean()),"Resolvido"])
+
+            # Group from plant/line, then context.
+            if "grupo" in out.columns:
+                missing=out["grupo"].isna() | out["grupo"].astype(str).str.strip().isin(["","<NA>","nan"])
+                if plant_field and plant_field in out.columns and missing.any():
+                    inferred=out[plant_field].astype(str).map(relationships.get("fabrica_to_grupo",{}))
+                    fill=missing & inferred.notna()
+                    if fill.any():
+                        out.loc[fill,"grupo"]=inferred[fill]
+                        report_rows.append([entity,"Grupo",int(fill.sum()),"relação Planta → Grupo",0.98,"Resolvido"])
+                        missing=out["grupo"].isna() | out["grupo"].astype(str).str.strip().isin(["","<NA>","nan"])
+                if "linha" in out.columns and missing.any():
+                    inferred=out["linha"].astype(str).map(relationships.get("linha_to_grupo",{}))
+                    fill=missing & inferred.notna()
+                    if fill.any():
+                        out.loc[fill,"grupo"]=inferred[fill]
+                        report_rows.append([entity,"Grupo",int(fill.sum()),"relação Linha → Grupo",0.96,"Resolvido"])
+                        missing=out["grupo"].isna() | out["grupo"].astype(str).str.strip().isin(["","<NA>","nan"])
+                if missing.any():
+                    context_map=mapping.get("semantic_context",{})
+                    ctx=source_sheet.map(lambda sh:(context_map.get(str(sh),{}).get("grupo") or {}).get("value"))
+                    ctx_conf=source_sheet.map(lambda sh:(context_map.get(str(sh),{}).get("grupo") or {}).get("confidence",0.0))
+                    fill=missing & ctx.notna() & (ctx.astype(str).str.strip()!="") & (ctx_conf>=0.68)
+                    if fill.any():
+                        out.loc[fill,"grupo"]=ctx[fill]
+                        report_rows.append([entity,"Grupo",int(fill.sum()),"contexto de arquivo/aba/cabeçalho",float(ctx_conf[fill].mean()),"Resolvido"])
+
+            standard[entity]=out
+        relationships=_merged_relationships(build_relationship_catalog(standard))
+
+    # Final unresolved report.
+    for entity,df in standard.items():
+        if df is None or df.empty:
+            continue
+        checks=[]
+        if "grupo" in FIELD_SPECS.get(entity,{}):
+            checks.append(("Grupo","grupo"))
+        if entity=="dre_gerencial" and "planta" in FIELD_SPECS.get(entity,{}):
+            checks.append(("Planta","planta"))
+        elif "fabrica" in FIELD_SPECS.get(entity,{}):
+            checks.append(("Planta","fabrica"))
+        for label,field in checks:
+            if field not in df.columns:
+                unresolved=len(df)
+            else:
+                unresolved=int((df[field].isna() | df[field].astype(str).str.strip().isin(["","<NA>","nan"])).sum())
+            if unresolved:
+                report_rows.append([entity,label,unresolved,"sem evidência suficiente",0.0,"Não resolvido"])
+
+    # Drop internal provenance columns before the application layer.
+    for entity,df in list(standard.items()):
+        if df is not None and not df.empty:
+            standard[entity]=df.drop(columns=[c for c in ["_source_sheet","_source_row"] if c in df.columns],errors="ignore")
+
+    report=pd.DataFrame(report_rows,columns=["Entidade","Dimensão","Registros","Método","Confiança","Status"])
+    if not report.empty:
+        report["Confiança"]=pd.to_numeric(report["Confiança"],errors="coerce").fillna(0.0)
+    mapping["semantic_relationships"]=relationships
+    mapping["semantic_resolution"]={
+        "resolved_rows":int(report.loc[report["Status"]=="Resolvido","Registros"].sum()) if not report.empty else 0,
+        "unresolved_rows":int(report.loc[report["Status"]=="Não resolvido","Registros"].sum()) if not report.empty else 0,
+        "report":report.to_dict(orient="records") if not report.empty else [],
+    }
+    for _,r in report[report["Status"]=="Resolvido"].iterrows() if not report.empty else []:
+        lineage.append({
+            "entidade":r["Entidade"],"campo_padrao":r["Dimensão"].lower(),
+            "aba_origem":"semantic","coluna_origem":"relacionamentos/contexto",
+            "unidade_origem":None,"unidade_destino":None,"confianca":float(r["Confiança"]),
+            "transformacao":f"resolução semântica: {r['Método']} ({int(r['Registros'])} registros)"
+        })
+    return standard,lineage,report
+
 def inspect_workbook(raw: bytes, filename: str = "arquivo.xlsx") -> Dict[str, Any]:
     xls = pd.ExcelFile(BytesIO(raw))
     sheets: Dict[str, Any] = {}
     total_rows = 0
     for sh in xls.sheet_names:
-        df = pd.read_excel(BytesIO(raw), sheet_name=sh)
+        df,read_meta = smart_read_sheet(raw,sh)
         total_rows += len(df)
         sheets[sh] = {
             "rows": int(len(df)),
@@ -364,6 +822,10 @@ def inspect_workbook(raw: bytes, filename: str = "arquivo.xlsx") -> Dict[str, An
             "columns": [str(c) for c in df.columns],
             "types": {str(c): _type_hint(df[c]) for c in df.columns},
             "preview": df.head(20),
+            "header_row": int(read_meta.get("header_row",0)),
+            "header_confidence": float(read_meta.get("confidence",0)),
+            "context_lines": read_meta.get("context_lines",[]),
+            "context_text": read_meta.get("context_text",""),
         }
     return {
         "filename": filename,
@@ -412,7 +874,7 @@ def suggest_entity(sheet_name: str, columns: List[str]) -> Tuple[Optional[str], 
 
 def suggest_column(entity: str, column_name: str, series: Optional[pd.Series] = None) -> Tuple[Optional[str], float, str]:
     specs = FIELD_SPECS.get(entity, {})
-    best_field, best_score = None, 0.0
+    best_field, best_score, best_sim = None, 0.0, 0.0
     detected_type = _type_hint(series) if series is not None else None
     for field, spec in specs.items():
         sim = max((_similarity(column_name, a) for a in spec.get("aliases", []) + [field]), default=0.0)
@@ -423,9 +885,30 @@ def suggest_column(entity: str, column_name: str, series: Optional[pd.Series] = 
         if sim >= 0.99:
             score = max(score, 0.98)
         if score > best_score:
-            best_field, best_score = field, score
-    if best_score < 0.48:
-        return None, best_score, f"tipo detectado: {detected_type or 'n/d'}"
+            best_field, best_score, best_sim = field, score, sim
+
+    # "Unidade" is ambiguous in industrial files: it can mean unit of measure
+    # or business/plant unit. Use values to decide and never map UOMs to Planta.
+    if norm(column_name) in {"unidade","unit"} and best_field in {"fabrica","planta"} and series is not None:
+        vals=[norm(v) for v in series.dropna().astype(str).head(80) if str(v).strip()]
+        uom_tokens={
+            "kg","g","t","ton","tonelada","toneladas","un","und","unidade","unidades",
+            "pct","percentual","porcentagem","r","rs","r_mil","h","hora","horas",
+            "min","minuto","minutos","kwh","mwh","litro","litros","l"
+        }
+        if vals and sum(v in uom_tokens for v in vals)/len(vals) >= 0.45:
+            return None, min(best_score,0.69), "coluna 'Unidade' interpretada como unidade de medida, não Planta"
+        # Text-like repeated labels are plausible plants, but remain confirmable.
+        if vals and len(set(vals)) <= 30:
+            best_score=max(best_score,0.76)
+            best_sim=max(best_sim,0.60)
+
+    # Semantic dimensions must have lexical evidence. Type alone cannot turn
+    # an arbitrary text column ("Observação", "Status", etc.) into Planta/Linha.
+    if best_field in DIMENSION_FIELDS and best_sim < 0.58:
+        return None, best_score, f"sem evidência semântica suficiente · tipo: {detected_type or 'n/d'}"
+    if best_score < 0.56:
+        return None, best_score, f"baixa confiança · tipo detectado: {detected_type or 'n/d'}"
     return best_field, min(best_score, 0.99), f"tipo detectado: {detected_type or 'n/d'}"
 
 
@@ -436,12 +919,16 @@ def build_initial_mapping(raw: bytes, filename: str = "arquivo.xlsx") -> Dict[st
     column_map: Dict[str, Dict[str, Any]] = {}
     unit_map: Dict[str, Dict[str, Any]] = {}
     dimension_map: Dict[str, Dict[str, Dict[str, str]]] = {}
+    semantic_context: Dict[str, Dict[str, Any]] = {}
 
     for sh, info in profile["sheets"].items():
         entity, conf, reason = suggest_entity(sh, info["columns"])
         sheet_map[sh] = {"entity": entity, "confidence": round(conf, 4), "reason": reason}
+        semantic_context[sh] = infer_sheet_semantic_context(
+            filename, sh, info.get("context_text",""), entity
+        )
         if entity:
-            df = pd.read_excel(BytesIO(raw), sheet_name=sh)
+            df, _ = smart_read_sheet(raw, sh)
             column_map[sh] = {}
             unit_map[sh] = {}
             dimension_map[sh] = {}
@@ -473,6 +960,7 @@ def build_initial_mapping(raw: bytes, filename: str = "arquivo.xlsx") -> Dict[st
         "column_map": column_map,
         "unit_map": unit_map,
         "dimension_map": dimension_map,
+        "semantic_context": semantic_context,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -488,7 +976,11 @@ def refresh_column_mapping(raw: bytes, mapping: Dict[str, Any]) -> Dict[str, Any
         entity = sm.get("entity")
         if not entity:
             continue
-        df = pd.read_excel(BytesIO(raw), sheet_name=sh)
+        df,read_meta = smart_read_sheet(raw, sh)
+        mapping.setdefault("semantic_context", {})[sh] = infer_sheet_semantic_context(
+            mapping.get("workbook",{}).get("filename","arquivo.xlsx"),
+            sh, read_meta.get("context_text",""), entity
+        )
         old = mapping["column_map"].get(sh, {})
         mapping["column_map"][sh] = {}
         mapping["unit_map"].setdefault(sh, {})
@@ -531,6 +1023,15 @@ def _convert_numeric(series: pd.Series) -> pd.Series:
     return pd.to_numeric(cleaned, errors="coerce")
 
 
+def _convert_date_series(series: pd.Series) -> pd.Series:
+    """Handle both true Excel dates and numeric Excel serial dates."""
+    numeric=pd.to_numeric(series,errors="coerce")
+    valid=numeric.dropna()
+    if len(valid) and float(valid.median())>=20000 and float(valid.median())<=80000:
+        return pd.to_datetime(numeric,unit="D",origin="1899-12-30",errors="coerce")
+    return pd.to_datetime(series,errors="coerce",dayfirst=True)
+
+
 def apply_unit_conversion(series: pd.Series, source_unit: Optional[str], target_unit: Optional[str]) -> pd.Series:
     if not target_unit or not source_unit or source_unit in {AUTO_UNIT, NO_CONVERSION} or source_unit == target_unit:
         return series
@@ -559,8 +1060,13 @@ def transform_to_standard(raw: bytes, mapping: Dict[str, Any]) -> Tuple[Dict[str
         entity = mapping.get("sheet_map", {}).get(sh, {}).get("entity")
         if not entity:
             continue
-        df = pd.read_excel(BytesIO(raw), sheet_name=sh)
+        df,read_meta = smart_read_sheet(raw, sh)
+        mapping.setdefault("semantic_context", {}).setdefault(
+            sh, infer_sheet_semantic_context(mapping.get("workbook",{}).get("filename","arquivo.xlsx"),sh,read_meta.get("context_text",""),entity)
+        )
         out = pd.DataFrame(index=df.index)
+        out["_source_sheet"]=sh
+        out["_source_row"]=np.arange(len(df))
         for source_col, cmeta in mapping.get("column_map", {}).get(sh, {}).items():
             field = cmeta.get("field")
             if not field or field == "Não mapear" or source_col not in df.columns:
@@ -570,7 +1076,7 @@ def transform_to_standard(raw: bytes, mapping: Dict[str, Any]) -> Tuple[Dict[str
             source_unit = mapping.get("unit_map", {}).get(sh, {}).get(source_col, {}).get("source", AUTO_UNIT)
             target_unit = spec.get("unit")
             if spec.get("dtype") == "date":
-                ser = pd.to_datetime(ser, errors="coerce", dayfirst=True)
+                ser = _convert_date_series(ser)
             elif spec.get("dtype") == "number":
                 ser = _convert_numeric(ser)
                 ser = apply_unit_conversion(ser, source_unit, target_unit)
@@ -595,6 +1101,9 @@ def transform_to_standard(raw: bytes, mapping: Dict[str, Any]) -> Tuple[Dict[str
             standard[entity] = pd.concat([standard[entity], out], ignore_index=True)
         else:
             standard[entity] = out.reset_index(drop=True)
+
+    standard, semantic_lineage, _ = semantic_enrich_standard(standard, mapping)
+    lineage.extend(semantic_lineage)
     return standard, lineage
 
 
@@ -700,7 +1209,7 @@ def evaluate_data_quality(standard: Dict[str, pd.DataFrame], mapping: Optional[D
                 else:
                     _check_row(checks, "Padrões", "Mix multiproduto", "Alta", "OK", "Todos os produtos possuem cadastro de padrão.", 0.0)
 
-    # Mapping ambiguity
+    # Mapping ambiguity + semantic resolution
     if mapping:
         low = []
         for sh, cols in mapping.get("column_map", {}).items():
@@ -711,6 +1220,21 @@ def evaluate_data_quality(standard: Dict[str, pd.DataFrame], mapping: Optional[D
             penalty = min(4.0, 0.5 * len(low))
             score -= penalty
             _check_row(checks, "Mapeamento", "Confiança", "Média", "Atenção", f"{len(low)} campo(s) com baixa confiança; confirme o DE/PARA.", penalty)
+
+        semantic_records=mapping.get("semantic_resolution",{}).get("report",[])
+        unresolved=[r for r in semantic_records if r.get("Status")=="Não resolvido"]
+        if unresolved:
+            critical_prod=sum(int(r.get("Registros",0)) for r in unresolved if r.get("Entidade")=="producao" and r.get("Dimensão")=="Planta")
+            total_unresolved=sum(int(r.get("Registros",0)) for r in unresolved)
+            penalty=min(8.0, 5.0 if critical_prod else max(1.0,total_unresolved*0.02))
+            score-=penalty
+            detail=f"{total_unresolved} registro(s) com dimensão sem evidência suficiente."
+            if critical_prod:
+                detail+=f" Produção possui {critical_prod} registro(s) sem Planta resolvida."
+            _check_row(checks,"Semântica","Entity Resolution","Alta","Atenção",detail,penalty)
+        else:
+            if semantic_records:
+                _check_row(checks,"Semântica","Entity Resolution","Alta","OK","Dimensões semânticas resolvidas sem lacunas relevantes.",0.0)
 
     score = float(max(0.0, min(100.0, score)))
     if blocking:
@@ -828,7 +1352,76 @@ def persist_ingestion(
     registry = meta_dir / "ingestions.jsonl"
     with registry.open("a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+
+    semantic_meta={
+        "semantic_context":mapping.get("semantic_context",{}),
+        "semantic_relationships":mapping.get("semantic_relationships",{}),
+        "semantic_resolution":mapping.get("semantic_resolution",{}),
+    }
+    (meta_dir / f"semantic_{ingestion_id}.json").write_text(
+        json.dumps(semantic_meta,ensure_ascii=False,indent=2,default=str),encoding="utf-8"
+    )
+    # Active pointer for process/app restarts in the MVP environment.
+    (meta_dir / "active_ingestion.json").write_text(
+        json.dumps(record,ensure_ascii=False,indent=2,default=str),encoding="utf-8"
+    )
     return record
+
+
+def _read_standard_dir(path: Path) -> Dict[str,pd.DataFrame]:
+    standard={}
+    if not path.exists():
+        return standard
+    parquet_files=list(path.glob("*.parquet"))
+    csv_files=list(path.glob("*.csv"))
+    for p in parquet_files:
+        try:
+            if duckdb is not None:
+                con=duckdb.connect(database=":memory:")
+                try:
+                    safe_path=str(p).replace("'","''")
+                    df=con.execute(f"SELECT * FROM read_parquet('{safe_path}')").df()
+                finally:
+                    con.close()
+            else:
+                df=pd.read_parquet(p)
+            standard[p.stem]=df
+        except Exception:
+            continue
+    for p in csv_files:
+        if p.stem in standard:
+            continue
+        try:
+            standard[p.stem]=pd.read_csv(p)
+        except Exception:
+            continue
+    return standard
+
+
+def load_active_ingestion(root: Optional[Path] = None) -> Tuple[Optional[Dict[str,pd.DataFrame]],Optional[Dict[str,Any]]]:
+    """Reload the active Standard layer when the current app process still has its local data directory."""
+    root=data_root(root)
+    pointer=root / "metadata" / "active_ingestion.json"
+    if not pointer.exists():
+        return None,None
+    try:
+        record=json.loads(pointer.read_text(encoding="utf-8"))
+        standard=_read_standard_dir(Path(record.get("standard_path","")))
+        if standard:
+            return standard,record
+    except Exception:
+        pass
+    return None,None
+
+
+def clear_active_ingestion(root: Optional[Path] = None) -> None:
+    root=data_root(root)
+    p=root / "metadata" / "active_ingestion.json"
+    try:
+        if p.exists():
+            p.unlink()
+    except Exception:
+        pass
 
 
 def list_ingestions(root: Optional[Path] = None) -> pd.DataFrame:

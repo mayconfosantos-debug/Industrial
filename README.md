@@ -1,4 +1,4 @@
-# Industrial Performance — v0.6.4.4 Simulator Drivers Hotfix
+# Industrial Performance — v0.6.5 Industrial Semantic Intelligence
 
 ## Objetivo
 A v0.6.3 cria a camada de entrada de dados do Industrial Performance:
@@ -282,3 +282,111 @@ Teste de regressão com a base padrão:
 - O simulador agora abre neutro (`Meta = Atual`) e descarta estados antigos da sessão, evitando metas obsoletas como 33%, 20% ou 1%.
 - `Cenário exemplo` aplica melhorias relativas ao baseline atual, nunca metas fixas inferiores ao desempenho corrente.
 - OEE permanece no modelo como KPI/resultado e pode ser comparado à meta corporativa, mas não é uma alavanca editável.
+
+## v0.6.5 — Industrial Semantic Intelligence
+
+### Por que esta versão existe
+A v0.6.5 fecha uma lacuna importante observada nos filtros globais: o arquivo Excel versionado no GitHub não era, por si só, um dataset ativo. O app usava `st.session_state.real_data`; após deploy/restart esse estado voltava a `None` e a interface caía no demo interno.
+
+A v0.6.5 separa claramente:
+- arquivo versionado no repositório = referência/bootstrap;
+- Central de Dados = ingestão real;
+- Standard/Semantic Model = fonte dos filtros e engines.
+
+### Startup / ativação de dados
+Ordem de precedência:
+1. última ingestão ativa disponível no armazenamento local do piloto;
+2. `Industrial_Performance_Input_Padrao_v065.xlsx` versionado no repositório, processado pelo mesmo Data Layer;
+3. demo hardcoded apenas como último fallback.
+
+Assim, após deploy, a base padrão multipla plantas já alimenta Grupo / Planta / Linha / Produto sem depender de `session_state` anterior. Dados carregados pela Central de Dados continuam substituindo a base padrão.
+
+### Smart Read
+- procura o cabeçalho real nas primeiras linhas da aba;
+- preserva células acima da tabela como contexto semântico;
+- suporta cabeçalhos deslocados, relatórios com títulos e metadados antes da tabela;
+- trata serial numérico do Excel como data quando apropriado.
+
+### Entity Resolution
+Resolve dimensões por múltiplas evidências:
+- coluna explícita;
+- nome da aba;
+- nome do arquivo;
+- células de contexto acima da tabela;
+- relações entre Linha, Máquina, Produto, Planta e Grupo;
+- relacionamentos aprendidos e salvos no mapping da empresa/fonte.
+
+O motor não preenche relações ambíguas. Quando não há evidência suficiente, a dimensão permanece **Não resolvida**.
+
+### Relationship Engine
+Relações suportadas nesta fase:
+- Linha → Planta;
+- Máquina → Linha;
+- Máquina → Planta;
+- Produto → Planta quando a relação é única;
+- Planta → Grupo;
+- Linha → Grupo.
+
+A aba opcional `Cadastro_Dimensoes` pode funcionar como master data para enriquecer arquivos operacionais incompletos.
+
+### Canonicalização semântica
+Exemplos como `Campinas`, `Fábrica Campinas` e `Planta Campinas` convergem para uma representação canônica. O mapping confirmado continua sendo a autoridade quando o cliente define um DE/PARA específico.
+
+### Segurança de interpretação
+- a coluna genérica `Unidade` não é automaticamente tratada como Planta quando os valores parecem unidades de medida (`kg`, `h`, `%`, `kWh` etc.);
+- colunas textuais vagas como `Observação` não podem virar Planta/Linha apenas por compatibilidade de tipo;
+- Data Quality passa a reportar lacunas de Entity Resolution.
+
+### Persistência do piloto
+DuckDB + Parquet continuam locais e temporários no Streamlit Cloud. Um ponteiro de ingestão ativa permite restaurar a base enquanto o storage local existir. Para persistência empresarial após redeploy/scale, permanece o plano de Object Storage + PostgreSQL.
+
+### Base de QA
+O release inclui:
+- `Industrial_Performance_Input_Padrao_v065.xlsx` — base padrão com 3 plantas + `Cadastro_Dimensoes`;
+- `Industrial_Performance_Teste_Semantico_v065.xlsx` — exemplo semi-estruturado com cabeçalho fora da linha 1 e Planta/Grupo no contexto.
+
+## v0.6.5 — OEE reconciliado + auditoria final do Bridge EBITDA
+
+### OEE: uma alavanca, um único cálculo
+- OEE volta a ser editável diretamente.
+- Disponibilidade, Performance e Qualidade OEE também podem ser editadas individualmente.
+- Não existe seletor `OEE direto` x `Drivers`.
+- O sistema mantém sempre a identidade `OEE = Disponibilidade × Performance × Qualidade`.
+- Se OEE for alterado, Performance é o balanceador primário; Disponibilidade e Qualidade só são ajustadas se necessário para atingir uma meta fisicamente possível.
+- Se qualquer driver for alterado, OEE é recalculado imediatamente.
+- Qualidade OEE e Refugo são sincronizados no modelo atual (`Qualidade = 100% - Refugo`) para impedir cenários contraditórios.
+- Setup, Paradas não planejadas e MTTR continuam sendo subdrivers de Disponibilidade e atualizam o OEE sem gerar um segundo motor.
+
+### Bridge de EBITDA — double check
+A auditoria agora mantém explicitamente todas as 15 parcelas aditivas, inclusive quando o valor no cenário é zero:
+1. Volume vendido
+2. Preço médio
+3. Mix
+4. Refugo
+5. Retrabalho
+6. Produtividade
+7. Horas extras
+8. Consumo específico de MP
+9. Preço de MP
+10. Perdas de material
+11. kWh/unidade
+12. Frete/unidade
+13. Contratos/serviços
+14. Custo fixo
+15. Headcount
+
+O gráfico mostra apenas impactos materiais, mas a tabela de auditoria mostra todas as parcelas. A soma do Bridge é comparada automaticamente ao Δ EBITDA da DRE simulada.
+
+Ficam explicitamente fora do EBITDA aditivo:
+- OEE / Disponibilidade / Performance / Qualidade / Capacidade: habilitam produção e monetizam via Volume vendido;
+- Setup / Paradas / MTTR: subdrivers de Disponibilidade;
+- OTIF: receita protegida;
+- Estoque / DPO / DSO: capital de giro / caixa;
+- GGF Manutenção, Outros GGF e Despesas: permanecem na base até existir uma alavanca explícita.
+
+Validações matemáticas realizadas na base padrão v0.6.5:
+- cenário neutro: Δ EBITDA = 0 e Bridge = 0;
+- cenário multi-alavancas: Bridge reconciliado com erro numérico ~R$ 0;
+- testes individuais dos drivers/alavancas: reconciliação do Bridge aprovada;
+- base padrão: OEE atual = A × P × Q sem divergência;
+- Qualidade OEE + Refugo = 100% no modelo atual.

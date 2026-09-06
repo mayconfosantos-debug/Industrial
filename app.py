@@ -1629,18 +1629,37 @@ def simulator_baselines(D):
     dpo=float(D.get("dpo_days",np.nan))
     dso=float(D.get("dso_days",np.nan))
 
+    labor_eff=float(D.get("labor_efficiency",np.nan))
+    if pd.notna(labor_eff) and labor_eff>0:
+        productivity_base=labor_eff*100
+        productivity_unit="% eficiência HH padrão"
+    else:
+        productivity_base=max(0.01,float(D.get("productivity",18.2) or 18.2))
+        productivity_unit="un/h eq."
+
+    oee_base=float(D.get("oee",0))*100
+    availability_base=float(D.get("availability",0))*100
+    performance_base=float(D.get("performance",0))*100
+    quality_observed=float(D.get("quality",1.0))*100
+    denom=(availability_base/100)*min(performance_base/100,1.0)
+    quality_implied=safe_div(oee_base/100,denom)*100 if denom>0 else quality_observed
+    quality_base=quality_implied if 1.0 <= quality_implied <= 100.0 else quality_observed
+
     return {
-        "oee":float(D.get("oee",0))*100,
-        "availability":float(D.get("availability",0))*100,
-        "performance":float(D.get("performance",0))*100,
+        "oee":oee_base,
+        "availability":availability_base,
+        "performance":performance_base,
+        "quality":quality_base,
+        "quality_observed":quality_observed,
         "capacity":sim_assumption("capacidade_utilizada_base",72.0),
         "scrap":float(D.get("scrap",0))*100,
         "rework":rework,
         "setup":setup,
         "unplanned_hours":float(D.get("unplanned_downtime_h",0) or 0),
         "mttr":mttr,
-        "overtime_hours":float(D.get("overtime",0) or 0),
-        "productivity":max(0.01,float(D.get("productivity",18.2) or 18.2)),
+        "overtime_hours":float(D.get("overtime",0)) if pd.notna(D.get("overtime",np.nan)) else 0.0,
+        "productivity":productivity_base,
+        "productivity_unit":productivity_unit,
         "headcount":float(D.get("avg_headcount",118) if pd.notna(D.get("avg_headcount",np.nan)) else 118),
         "mp_specific":max(0.0001,float(mp_specific)),
         "mp_specific_unit":mp_specific_unit,
@@ -1662,12 +1681,20 @@ def simulator_baselines(D):
     }
 
 
-def calculate_simulator_scenario(D, targets, prod_mode=None):
+def calculate_simulator_scenario(D, targets, oee_source="drivers"):
     """
-    Motor determinístico do simulador.
-    A entrada é sempre valor atual -> valor meta.
-    Preço e volume são encadeados: Receita = volume simulado x preço simulado.
-    OTIF é receita protegida e não entra automaticamente na DRE.
+    Motor determinístico do simulador v0.6.5.
+
+    Regras centrais:
+    - Inputs são sempre Atual -> Meta.
+    - OEE é uma alavanca editável, mas permanece matematicamente reconciliado
+      com Disponibilidade x Performance x Qualidade. A UI faz sincronização
+      bidirecional; o motor usa o produto dos drivers como defesa final.
+    - OEE/capacidade/processo habilitam capacidade; só entram em EBITDA por
+      meio de Volume vendido para evitar dupla contagem.
+    - Preço x Volume são encadeados.
+    - OTIF é receita protegida, fora da DRE automática.
+    - Capital de giro é caixa, fora do EBITDA.
     """
     B=simulator_baselines(D)
 
@@ -1690,30 +1717,28 @@ def calculate_simulator_scenario(D, targets, prod_mode=None):
     other_opex=float(D.get("other_opex",0))
     expenses_total=exp_admin+exp_commercial+exp_logistics+other_opex
 
-    # ---------- Capacidade / produção: habilita volume, não soma EBITDA em duplicidade ----------
+    # ---------- OEE / capacidade ----------
     base_oee=max(0.0001,float(D.get("oee",0.0001)))
-    base_avail=max(0.0001,float(D.get("availability",0.0001)))
-    base_perf=max(0.0001,float(D.get("performance",0.0001)))
-    base_quality=max(0.0001,float(D.get("quality",1.0)))
+    effective_availability=float(np.clip(float(targets["availability"])/100,0.01,0.99))
+    effective_performance=float(np.clip(float(targets["performance"])/100,0.01,1.05))
+    effective_quality=float(np.clip(float(targets.get("quality",B["quality"]))/100,0.01,1.0))
+    driver_oee=float(np.clip(effective_availability*min(effective_performance,1.0)*effective_quality,0.01,0.99))
+    entered_oee=float(np.clip(float(targets.get("oee",driver_oee*100))/100,0.01,0.99))
+    oee_reconciliation_gap_pp=(entered_oee-driver_oee)*100
+    # Defesa final: nunca permita que OEE financeiro e A x P x Q sejam diferentes.
+    effective_oee=driver_oee
 
+    # Processo é subdriver de Disponibilidade. A UI sincroniza a disponibilidade
+    # quando processo é a última edição; aqui calculamos apenas a evidência implícita.
+    base_avail=max(0.0001,float(D.get("availability",0.0001)))
     setup_improvement=(B["setup"]-targets["setup"])/max(B["setup"],1e-9)
     unplanned_improvement=(B["unplanned_hours"]-targets["unplanned_hours"])/max(B["unplanned_hours"],1e-9) if B["unplanned_hours"]>0 else 0
     mttr_improvement=(B["mttr"]-targets["mttr"])/max(B["mttr"],1e-9)
     downtime_share=max(0.0,1-base_avail)
     process_recovery=downtime_share*(0.25*setup_improvement+0.45*unplanned_improvement+0.30*mttr_improvement)
-    derived_availability=float(np.clip(base_avail+process_recovery,0.01,0.99))
+    process_implied_availability=float(np.clip(base_avail+process_recovery,0.01,0.99))
 
-    # OEE é sempre resultado dos drivers — não existe mais seletor OEE direto x Drivers.
-    manual_availability=float(np.clip(targets["availability"]/100,0.01,0.99))
-    effective_availability=max(manual_availability,derived_availability)
-    effective_performance=float(np.clip(targets["performance"]/100,0.01,1.05))
-    base_scrap_ratio=float(B["scrap"])/100
-    target_scrap_ratio=float(targets["scrap"])/100
-    quality_ratio=(1-target_scrap_ratio)/max(1-base_scrap_ratio,0.001)
-    effective_quality=float(np.clip(base_quality*quality_ratio,0.01,1.0))
-    effective_oee=float(np.clip(effective_availability*min(effective_performance,1.0)*effective_quality,0.01,0.99))
-
-    capacity_ratio=max(0.01,targets["capacity"]/max(B["capacity"],0.01))
+    capacity_ratio=max(0.01,float(targets["capacity"])/max(B["capacity"],0.01))
     performance_capacity_ratio=max(0.01,effective_oee/base_oee)*capacity_ratio
     potential_units=max(0.0,base_volume*performance_capacity_ratio)
 
@@ -1722,16 +1747,16 @@ def calculate_simulator_scenario(D, targets, prod_mode=None):
     realized_volume=max(0.0,realized_volume)
     volume_factor=safe_div(realized_volume,base_volume)
 
-    # ---------- Receita: preço x volume, sem soma independente sobre a mesma base ----------
+    # ---------- Receita: preço x volume ----------
     target_price=max(0.0,float(targets["price_per_unit"]))
     volume_revenue_effect=base_price*(realized_volume-base_volume)
     price_revenue_effect=realized_volume*(target_price-base_price)
     simulated_revenue=base_revenue+volume_revenue_effect+price_revenue_effect
 
-    # Mix altera contribuição / EBITDA, não a receita nominal.
+    # Mix altera margem/EBITDA, não receita nominal.
     mix_ebitda=simulated_revenue*(float(targets["mix_pp"])/100)
 
-    # ---------- MP / insumos: efeitos encadeados ----------
+    # ---------- MP / insumos: waterfall encadeado ----------
     mp_after_volume=base_mp*volume_factor
     base_scrap=float(B["scrap"])/100
     target_scrap=float(targets["scrap"])/100
@@ -1759,7 +1784,7 @@ def calculate_simulator_scenario(D, targets, prod_mode=None):
     productivity_factor=B["productivity"]/max(float(targets["productivity"]),0.01)
     mod_after_productivity=mod_after_rework*productivity_factor
 
-    actual_hh=max(1.0,float(D.get("actual_hh",1)))
+    actual_hh=max(1.0,float(D.get("actual_hh",1)) if pd.notna(D.get("actual_hh",np.nan)) else 1.0)
     labor_rate=safe_div(base_mod,actual_hh)
     overtime_premium_factor=sim_assumption("adicional_hora_extra",0.50)
     overtime_saving=(B["overtime_hours"]-float(targets["overtime_hours"]))*labor_rate*overtime_premium_factor
@@ -1777,12 +1802,12 @@ def calculate_simulator_scenario(D, targets, prod_mode=None):
     energy_saving=energy_after_rework-scenario_energy
     rework_saving=rework_mod_saving+rework_energy_saving
 
-    # ---------- Frete dentro de GGF ----------
+    # ---------- Frete em GGF ----------
     freight_after_volume=base_freight*volume_factor
     scenario_freight=max(0.0,float(targets["freight_per_unit"])*realized_volume)
     freight_saving=freight_after_volume-scenario_freight
 
-    # ---------- GGF / Estrutura ----------
+    # ---------- GGF / estrutura ----------
     scenario_contracts=max(0.0,float(targets["contracts_services"]))
     contracts_saving=base_contracts-scenario_contracts
 
@@ -1809,7 +1834,8 @@ def calculate_simulator_scenario(D, targets, prod_mode=None):
     ebitda_gain=simulated_ebitda-base_ebitda
     revenue_gain=simulated_revenue-base_revenue
 
-    # O efeito volume no EBITDA inclui a variação de custos necessária para produzir/vender o volume.
+    # Volume carrega os custos variáveis de base. Manutenção, contratos e outros GGF
+    # permanecem fixos/mistos por padrão e só mudam por alavanca explícita.
     volume_cost_effect=-(
         (mp_after_volume-base_mp)+(mod_after_volume-base_mod)+
         (energy_after_volume-base_energy)+(freight_after_volume-base_freight)
@@ -1817,28 +1843,25 @@ def calculate_simulator_scenario(D, targets, prod_mode=None):
     volume_ebitda=volume_revenue_effect+volume_cost_effect
     price_ebitda=price_revenue_effect
 
-    # ---------- OTIF: valor protegido, não DRE automática ----------
+    # ---------- OTIF: receita protegida, fora do EBITDA ----------
     otif_delta=float(targets["otif"])-B["otif"]
-    if otif_delta>=0:
-        denominator=max(1.0,100-B["otif"])
-    else:
-        denominator=max(1.0,B["otif"])
+    denominator=max(1.0,100-B["otif"]) if otif_delta>=0 else max(1.0,B["otif"])
     otif_protected_value=base_revenue*sim_assumption("receita_em_risco_otif",0.12)*(otif_delta/denominator)
 
-    # ---------- Capital de giro fora do EBITDA ----------
+    # ---------- Capital de giro: caixa, fora do EBITDA ----------
     period_days=max(1.0,sim_assumption("dias_periodo",30.0))
     inventory_release=(float(D.get("cost_structure",{}).get("Variável",scenario_industrial_cost))/period_days)*(B["inventory_days"]-float(targets["inventory_days"]))
     supplier_release=(base_mp/period_days)*(float(targets["dpo_days"])-B["dpo_days"])
     customer_release=(simulated_revenue/period_days)*(B["dso_days"]-float(targets["dso_days"]))
     working_capital_release=inventory_release+supplier_release+customer_release
 
-    # ---------- Capacidade habilitada ----------
+    # ---------- Capacidade habilitada, não aditiva ----------
     incremental_capacity_units=max(0.0,potential_units-base_volume)
     unit_industrial_margin=safe_div(base_revenue-float(D.get("cost_structure",{}).get("Variável",0)),base_volume)
     capacity_value=max(0.0,incremental_capacity_units*max(unit_industrial_margin,0))
 
-    # ---------- Bridge reconciliado ----------
-    bridge={
+    # ---------- Bridge de EBITDA: somente efeitos aditivos à DRE ----------
+    bridge_all={
         "Volume vendido":volume_ebitda,
         "Preço médio":price_ebitda,
         "Mix":mix_ebitda,
@@ -1855,16 +1878,27 @@ def calculate_simulator_scenario(D, targets, prod_mode=None):
         "Custo fixo":fixed_saving,
         "Headcount":headcount_ebitda,
     }
-    bridge={k:float(v) for k,v in bridge.items() if abs(float(v))>0.5}
+    # O gráfico mostra apenas impactos materiais; a auditoria mantém TODAS as parcelas,
+    # inclusive zero, para deixar explícito que nenhuma linha aditiva foi esquecida.
+    bridge_all={k:float(v) for k,v in bridge_all.items()}
+    bridge={k:v for k,v in bridge_all.items() if abs(v)>0.005}
+    bridge_total=float(sum(bridge_all.values()))
+    bridge_reconciliation_error=float(ebitda_gain-bridge_total)
+    bridge_reconciled=abs(bridge_reconciliation_error)<=max(1.0,abs(ebitda_gain)*1e-9)
 
-    # ---------- Value map: drivers de produção ----------
+    # ---------- Value map: atribuição de capacidade sem dupla contagem ----------
     enable_weights={}
-    enable_weights["Disponibilidade"]=abs(float(targets["availability"])-B["availability"])/max(B["availability"],1)
-    enable_weights["Performance"]=abs(float(targets["performance"])-B["performance"])/max(B["performance"],1)
+    if oee_source=="oee":
+        enable_weights["OEE"]=abs(float(targets["oee"])-B["oee"])/max(B["oee"],1)
+    elif oee_source=="process":
+        enable_weights["Setup médio"]=abs(float(targets["setup"])-B["setup"])/max(B["setup"],1)
+        enable_weights["Paradas não planejadas"]=abs(float(targets["unplanned_hours"])-B["unplanned_hours"])/max(B["unplanned_hours"],1) if B["unplanned_hours"] else 0
+        enable_weights["MTTR"]=abs(float(targets["mttr"])-B["mttr"])/max(B["mttr"],1)
+    else:
+        enable_weights["Disponibilidade"]=abs(float(targets["availability"])-B["availability"])/max(B["availability"],1)
+        enable_weights["Performance"]=abs(float(targets["performance"])-B["performance"])/max(B["performance"],1)
+        enable_weights["Qualidade OEE"]=abs(float(targets.get("quality",B["quality"]))-B["quality"])/max(B["quality"],1)
     enable_weights["Capacidade utilizada"]=abs(float(targets["capacity"])-B["capacity"])/max(B["capacity"],1)
-    enable_weights["Setup médio"]=abs(float(targets["setup"])-B["setup"])/max(B["setup"],1)
-    enable_weights["Paradas não planejadas"]=abs(float(targets["unplanned_hours"])-B["unplanned_hours"])/max(B["unplanned_hours"],1) if B["unplanned_hours"] else 0
-    enable_weights["MTTR"]=abs(float(targets["mttr"])-B["mttr"])/max(B["mttr"],1)
     total_weight=sum(enable_weights.values()) or 1.0
 
     breakdown=[]
@@ -1899,9 +1933,27 @@ def calculate_simulator_scenario(D, targets, prod_mode=None):
         breakdown_df["AbsImpact"]=breakdown_df["Impacto_R$"].abs()
         breakdown_df=breakdown_df.sort_values("AbsImpact",ascending=False).drop(columns=["AbsImpact"])
 
+    # Auditoria do bridge: explicita o que entra, o que fica fora e por quê.
+    bridge_audit_rows=[]
+    for name,value in bridge_all.items():
+        bridge_audit_rows.append([name,"Sim",value,"EBITDA","Parcela aditiva contemplada e reconciliada à DRE simulada"])
+    non_additive=[
+        ("OEE / Disponibilidade / Performance / Qualidade OEE",capacity_value,"Capacidade","Habilitador; monetização ocorre em Volume vendido"),
+        ("Capacidade utilizada",capacity_value,"Capacidade","Habilitador; não reduz custo fixo total automaticamente"),
+        ("Setup / Paradas / MTTR",capacity_value,"Capacidade","Subdrivers de disponibilidade; não somar novamente ao EBITDA"),
+        ("OTIF",otif_protected_value,"Receita protegida","Fora da Receita/EBITDA automática"),
+        ("Estoque / DPO / DSO",working_capital_release,"Caixa","Capital de giro fora do EBITDA"),
+        ("GGF — Manutenção",0.0,"DRE sem alavanca","Mantido na base nesta versão; MTTR atua em capacidade, não em custo direto"),
+        ("GGF — Outros",0.0,"DRE sem alavanca","Mantido na base nesta versão"),
+        ("Despesas Adm./Com./Log./Outros OPEX",0.0,"DRE sem alavanca","Mantidas na base; não há lever explícito nesta versão"),
+    ]
+    for name,value,kind,note in non_additive:
+        bridge_audit_rows.append([name,"Não",float(value),kind,note])
+    bridge_audit_df=pd.DataFrame(bridge_audit_rows,columns=["Componente","Entra no Bridge","Valor_R$","Natureza","Regra"])
+
     simulated_dre=pd.DataFrame({
         "Linha":[
-            "Receita Líquida","(-) Insumos / Matéria-prima","(-) MOD",
+            "Receita Líquida","(+/-) Efeito de Mix","(-) Insumos / Matéria-prima","(-) MOD",
             "(-) GGF — Frete","(-) GGF — Energia","(-) GGF — Manutenção",
             "(-) GGF — Contratos e Serviços","(-) GGF — Outros",
             "Margem Industrial","(-) Custos Fixos Industriais","Resultado Industrial",
@@ -1909,7 +1961,7 @@ def calculate_simulator_scenario(D, targets, prod_mode=None):
             "(-) Despesas Logísticas","(-) Outros OPEX","EBITDA"
         ],
         "Base":[
-            base_revenue,-base_mp,-base_mod,-base_freight,-base_energy,-base_maintenance,
+            base_revenue,0.0,-base_mp,-base_mod,-base_freight,-base_energy,-base_maintenance,
             -base_contracts,-base_ggf_other,
             base_revenue-(base_mp+base_mod+base_freight+base_energy+base_maintenance+base_contracts+base_ggf_other),
             -base_fixed,
@@ -1917,7 +1969,7 @@ def calculate_simulator_scenario(D, targets, prod_mode=None):
             -exp_admin,-exp_commercial,-exp_logistics,-other_opex,base_ebitda
         ],
         "Simulado":[
-            simulated_revenue,-scenario_mp,-scenario_mod,-scenario_freight,-scenario_energy,-base_maintenance,
+            simulated_revenue,mix_ebitda,-scenario_mp,-scenario_mod,-scenario_freight,-scenario_energy,-base_maintenance,
             -scenario_contracts,-base_ggf_other,simulated_industrial_margin_value,
             -scenario_fixed,simulated_result_industrial,
             -exp_admin,-exp_commercial,-exp_logistics,-other_opex,simulated_ebitda
@@ -1934,6 +1986,9 @@ def calculate_simulator_scenario(D, targets, prod_mode=None):
         "effective_availability":effective_availability,
         "effective_performance":effective_performance,
         "effective_quality":effective_quality,
+        "entered_oee":entered_oee,
+        "oee_reconciliation_gap_pp":oee_reconciliation_gap_pp,
+        "process_implied_availability":process_implied_availability,
         "simulated_revenue":simulated_revenue,
         "revenue_gain":revenue_gain,
         "simulated_ebitda":simulated_ebitda,
@@ -1945,11 +2000,16 @@ def calculate_simulator_scenario(D, targets, prod_mode=None):
         "scenario_fixed":scenario_fixed,
         "scenario_freight":scenario_freight,
         "bridge":bridge,
+        "bridge_all":bridge_all,
+        "bridge_total":bridge_total,
+        "bridge_reconciliation_error":bridge_reconciliation_error,
+        "bridge_reconciled":bridge_reconciled,
+        "bridge_audit":bridge_audit_df,
         "breakdown":breakdown_df,
         "simulated_dre":simulated_dre,
         "explicit_fixed_change":explicit_fixed_change,
+        "oee_source":oee_source,
     }
-
 
 def owner_email(owner_name):
     data=st.session_state.get("real_data")
@@ -2222,8 +2282,16 @@ def page_header(title, subtitle):
                 pd.Timestamp(current_filters["start"]).date()!=dmin.date()
                 or pd.Timestamp(current_filters["end"]).date()!=dmax.date()
             )
-        badge="Dados filtrados" if (non_period_active or period_restricted) else "Dados importados"
-        counts=f"{len(opts['grupo'])} grupo · {len(opts['planta'])} planta · {len(opts['linha'])} linhas · {len(opts['produto'])} produtos"
+        mode=st.session_state.get("data_mode","importado")
+        if non_period_active or period_restricted:
+            badge="Dados filtrados"
+        elif mode=="base_padrao":
+            badge="Base padrão · filtros ativos"
+        elif mode=="restaurado":
+            badge="Dados restaurados"
+        else:
+            badge="Dados importados"
+        counts=f"{len(opts['grupo'])} grupo · {len(opts['planta'])} plantas · {len(opts['linha'])} linhas · {len(opts['produto'])} produtos"
         st.markdown(
             f'<div style="display:flex;justify-content:flex-end;gap:.5rem;align-items:center;margin-top:-.25rem">'
             f'<span style="font-size:.72rem;color:#6E7C90">{counts}</span>'
@@ -2235,7 +2303,7 @@ def page_header(title, subtitle):
         c2.selectbox("Planta",["Planta São Paulo"],disabled=True,label_visibility="collapsed",key=f"demo_p_{title}")
         c3.selectbox("Linha",["Todas"],disabled=True,label_visibility="collapsed",key=f"demo_l_{title}")
         c4.selectbox("Produto",["Todos"],disabled=True,label_visibility="collapsed",key=f"demo_pr_{title}")
-        c5.markdown('<div style="text-align:right;padding-top:.2rem"><span class="data-badge">Dados demo · filtros após importação</span></div>',unsafe_allow_html=True)
+        c5.markdown('<div style="text-align:right;padding-top:.2rem"><span class="data-badge">Demo interno · sem base ativa</span></div>',unsafe_allow_html=True)
 
     st.markdown('<div class="eyebrow">EXECUÇÃO HOJE. COMPETITIVIDADE AMANHÃ.</div>',unsafe_allow_html=True)
     st.markdown(f'<div class="page-title">{title}</div>',unsafe_allow_html=True)
@@ -2249,7 +2317,7 @@ def page_header(title, subtitle):
 
 
 def admin_header(title, subtitle):
-    st.markdown('<div class="eyebrow">INDUSTRIAL DATA + ANALYTICS · v0.6.4.4</div>', unsafe_allow_html=True)
+    st.markdown('<div class="eyebrow">INDUSTRIAL DATA + SEMANTIC INTELLIGENCE · v0.6.5</div>', unsafe_allow_html=True)
     st.markdown(f'<div class="page-title">{title}</div>', unsafe_allow_html=True)
     st.markdown(f'<div class="page-subtitle">{subtitle}</div>', unsafe_allow_html=True)
 
@@ -2267,6 +2335,7 @@ def _idl_init_state():
         "idl_lineage": None,
         "idl_quality_checks": None,
         "idl_quality_summary": None,
+        "idl_semantic_report": None,
         "idl_company": "Grupo Industrial S.A.",
         "idl_source": "Excel mensal",
         "idl_last_record": None,
@@ -2336,6 +2405,7 @@ def _idl_load_uploaded_file(uploaded):
         st.session_state.idl_lineage = None
         st.session_state.idl_quality_checks = None
         st.session_state.idl_quality_summary = None
+        st.session_state.idl_semantic_report = None
 
 
 def _idl_apply_mapping_profile(profile_bytes):
@@ -2377,6 +2447,9 @@ def _idl_render_step_1():
         cols[1].metric("Registros lidos", f"{p['total_rows']:,}".replace(",", "."))
         cols[2].metric("Tamanho", f"{p['size_bytes']/1024:.0f} KB")
         cols[3].metric("Fingerprint", p["hash"][:10].upper())
+        shifted=sum(1 for info in p["sheets"].values() if int(info.get("header_row",0))>0)
+        if shifted:
+            st.info(f"Leitura inteligente detectou {shifted} aba(s) com cabeçalho fora da primeira linha. O conteúdo acima da tabela foi tratado como contexto semântico.")
 
         with st.expander("Ver estrutura detectada", expanded=False):
             rows = []
@@ -2388,6 +2461,7 @@ def _idl_render_step_1():
                     "Colunas": info["cols"],
                     "Sugestão": idl.ENTITY_LABELS.get(suggestion.get("entity"), "Ignorar / informativa"),
                     "Confiança": _idl_confidence_text(suggestion.get("confidence", 0)),
+                    "Cabeçalho": f"Linha {int(info.get('header_row',0))+1}",
                 })
             st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
@@ -2585,7 +2659,7 @@ def _idl_render_step_3():
         if not entity:
             continue
         mapped_sheets += 1
-        df = pd.read_excel(BytesIO(raw), sheet_name=sh)
+        df, _read_meta = idl.smart_read_sheet(raw, sh)
         with st.expander(f"{sh}  →  {idl.ENTITY_LABELS.get(entity, entity)}", expanded=mapped_sheets <= 2):
             ok = _idl_mapping_table_for_sheet(sh, entity, df)
             all_ok = all_ok and ok
@@ -2605,6 +2679,9 @@ def _idl_render_step_3():
                 quality = idl.evaluate_data_quality(standard, st.session_state.idl_mapping)
             st.session_state.idl_standard = standard
             st.session_state.idl_lineage = lineage
+            st.session_state.idl_semantic_report = pd.DataFrame(
+                st.session_state.idl_mapping.get("semantic_resolution",{}).get("report",[])
+            )
             st.session_state.idl_quality_checks = quality.checks
             st.session_state.idl_quality_summary = quality.summary
             _idl_set_step(4)
@@ -2641,6 +2718,20 @@ def _idl_render_step_4():
         view = quality.checks.copy()
         st.dataframe(view[["Categoria", "Item", "Severidade", "Resultado", "Detalhe", "Penalidade"]], use_container_width=True, hide_index=True)
 
+    semantic_report=st.session_state.get("idl_semantic_report")
+    st.markdown("#### Inteligência semântica")
+    st.caption("A camada resolve Grupo, Planta e relacionamentos usando coluna explícita, contexto do arquivo/aba/cabeçalho e relações entre Linha, Máquina e Produto. Dimensão sem evidência suficiente não é inventada.")
+    if isinstance(semantic_report,pd.DataFrame) and not semantic_report.empty:
+        resolved=int(semantic_report.loc[semantic_report["Status"]=="Resolvido","Registros"].sum())
+        unresolved=int(semantic_report.loc[semantic_report["Status"]=="Não resolvido","Registros"].sum())
+        c1,c2,c3=st.columns(3,gap="small")
+        c1.metric("Resoluções semânticas",f"{resolved:,}".replace(",","."))
+        c2.metric("Não resolvidos",f"{unresolved:,}".replace(",","."))
+        c3.metric("Relacionamentos",sum(len(v) for v in st.session_state.idl_mapping.get("semantic_relationships",{}).values()))
+        st.dataframe(semantic_report,use_container_width=True,hide_index=True,height=min(300,80+35*len(semantic_report)))
+    else:
+        st.success("As dimensões necessárias já estavam explícitas na fonte; nenhuma inferência adicional foi necessária.")
+
     entities = list(st.session_state.idl_standard.keys())
     if entities:
         with st.expander("Revisar dados padronizados", expanded=False):
@@ -2670,11 +2761,13 @@ def _idl_render_step_5():
         return
 
     nrows = sum(len(df) for df in st.session_state.idl_standard.values())
-    cols = st.columns(4, gap="small")
+    cols = st.columns(5, gap="small")
     cols[0].metric("Entidades", len(st.session_state.idl_standard))
     cols[1].metric("Registros standard", f"{nrows:,}".replace(",", "."))
     cols[2].metric("Data Quality", f"{quality.score:.0f}/100")
     cols[3].metric("Lineage", f"{len(st.session_state.idl_lineage or [])} campos")
+    sem=st.session_state.idl_mapping.get("semantic_resolution",{})
+    cols[4].metric("Semântica", "OK" if int(sem.get("unresolved_rows",0))==0 else f"{int(sem.get('unresolved_rows',0))} revisar")
 
     st.info("Ao aplicar, Cockpit, Diagnóstico e Simulador passam a consumir o modelo padronizado. A origem continua rastreável pelo lineage.")
 
@@ -2706,6 +2799,16 @@ def _idl_render_step_5():
             except Exception as exc:
                 persist_error = str(exc)
             st.session_state.real_data = st.session_state.idl_standard
+            st.session_state.data_mode = "importado"
+            st.session_state.active_data_source = st.session_state.idl_filename
+            # Force filters to rebuild from the newly applied Semantic/Standard model.
+            for _k in [
+                "af_dataset_signature","analytics_last_valid_data","analytics_last_valid_D",
+                "af_group","af_plant","af_line","af_product",
+                "af_ui_group","af_ui_plant","af_ui_line","af_ui_product",
+                "af_period","af_ui_period"
+            ]:
+                st.session_state.pop(_k,None)
             st.session_state.idl_last_record = record or {
                 "company": st.session_state.idl_company,
                 "source": st.session_state.idl_source,
@@ -2747,13 +2850,83 @@ def render_data_layer_import():
         _idl_render_step_5()
 
 
+
+def _load_packaged_standard_model():
+    """
+    v0.6.5 pilot bootstrap:
+    1) try to restore the last active local ingestion;
+    2) otherwise load the versioned packaged workbook from the repository;
+    3) hardcoded demo is only the final fallback.
+
+    This is important because putting an .xlsx in GitHub does NOT, by itself,
+    populate st.session_state.real_data.
+    """
+    restored,record=idl.load_active_ingestion()
+    if restored:
+        return restored,"restaurado",record,None,None
+
+    candidates=[
+        "Industrial_Performance_Input_Padrao_v065.xlsx",
+        "Industrial_Performance_Input_Padrao_v0644.xlsx",
+        "Industrial_Performance_Input_Padrao_v0631.xlsx",
+    ]
+    for filename in candidates:
+        path=Path(__file__).parent / filename
+        if not path.exists():
+            continue
+        try:
+            raw=path.read_bytes()
+            mapping=idl.build_initial_mapping(raw,filename)
+            standard,lineage=idl.transform_to_standard(raw,mapping)
+            quality=idl.evaluate_data_quality(standard,mapping)
+            if standard and not quality.blocking:
+                record={
+                    "company":"Grupo Industrial S.A.",
+                    "source":"Base padrão versionada",
+                    "filename":filename,
+                    "quality_score":quality.score,
+                    "quality_status":quality.status,
+                    "storage_mode":"github_packaged_reference",
+                    "version":idl.DATA_LAYER_VERSION,
+                }
+                return standard,"base_padrao",record,mapping,lineage
+        except Exception:
+            continue
+    return None,"demo",None,None,None
+
+
 # ============================================================
 # SESSION STATE
 # ============================================================
 if "page" not in st.session_state:
     st.session_state.page = "Cockpit Executivo"
+_idl_init_state()
 if "real_data" not in st.session_state:
     st.session_state.real_data = None
+if "data_mode" not in st.session_state:
+    st.session_state.data_mode = "demo"
+if "active_data_source" not in st.session_state:
+    st.session_state.active_data_source = ""
+
+# A GitHub-packaged Excel is a reference file until the app explicitly ingests it.
+# v0.6.5 bootstraps it through the SAME Data Layer so filters can be tested after deploy.
+if st.session_state.real_data is None:
+    _std,_mode,_record,_mapping,_lineage=_load_packaged_standard_model()
+    if _std:
+        st.session_state.real_data=_std
+        st.session_state.data_mode=_mode
+        st.session_state.active_data_source=(_record or {}).get("filename","")
+        st.session_state.idl_last_record=_record
+        if _mapping is not None:
+            st.session_state.idl_mapping=_mapping
+            st.session_state.idl_standard=_std
+            st.session_state.idl_lineage=_lineage or []
+            st.session_state.idl_semantic_report=pd.DataFrame(
+                _mapping.get("semantic_resolution",{}).get("report",[])
+            )
+    else:
+        st.session_state.data_mode="demo"
+
 if "actions" not in st.session_state:
     st.session_state.actions = pd.DataFrame([
         ["Alta","Disponibilidade Linha 3","Plano de confiabilidade MX-04","Ger. Manutenção","","10/09/2026","R$ 312 mil","Em andamento"],
@@ -3512,14 +3685,14 @@ elif page == "Finanças / DRE":
 
 
 elif page == "Alavancas de Valor":
-    page_header("Alavancas de Valor","Ajuste os drivers pelo valor que deseja atingir e veja o efeito no OEE, capacidade, DRE e EBITDA.")
+    page_header("Alavancas de Valor","Ajuste OEE ou seus drivers pelo valor-meta e veja o efeito em capacidade, DRE, EBITDA e caixa.")
 
     B=simulator_baselines(D)
 
-    # O simulador sempre abre neutro: Atual = Meta.
-    # OEE não é mais uma entrada editável; é calculado automaticamente pelos drivers.
+    # OEE volta a ser uma alavanca oficial, mas sem criar um segundo cálculo.
+    # Sincronização bidirecional garante sempre: OEE = Disponibilidade x Performance x Qualidade.
     lever_names=[
-        "availability","performance","capacity","scrap","rework","setup","unplanned_hours","mttr",
+        "oee","availability","performance","quality","capacity","scrap","rework","setup","unplanned_hours","mttr",
         "overtime_hours","productivity","headcount","mp_specific","mp_price","material_loss_pct",
         "energy_intensity","freight_per_unit","otif","price_per_unit","mix_pp","volume_units",
         "fixed_industrial","contracts_services","inventory_days","dpo_days","dso_days"
@@ -3528,6 +3701,7 @@ elif page == "Alavancas de Valor":
     example_targets={
         "availability":min(99.0,B["availability"]+2.0),
         "performance":min(100.0,B["performance"]+2.0),
+        "quality":B["quality"],  # recalculado após a meta de Refugo
         "capacity":min(95.0,B["capacity"]+5.0),
         "scrap":max(0.0,B["scrap"]*0.85),
         "rework":max(0.0,B["rework"]*0.85),
@@ -3552,83 +3726,97 @@ elif page == "Alavancas de Valor":
         "dpo_days":B["dpo_days"]+5,
         "dso_days":max(0.0,B["dso_days"]-5),
     }
+    # Qualidade do OEE e Refugo são duas leituras da mesma yield no modelo atual.
+    # Isso mantém as 26 alavancas oficiais: Qualidade OEE é um subdriver, não uma 27ª alavanca.
+    example_targets["quality"]=max(1.0,100.0-example_targets["scrap"])
+    example_targets["oee"]=(example_targets["availability"]/100)*min(example_targets["performance"]/100,1.0)*(example_targets["quality"]/100)*100
 
-    # Migração de estado: evita carregar 33%, 20%, 1% etc. de versões anteriores.
-    simulator_state_version="0.6.4.4"
+    simulator_state_version="0.6.5-oee-sync-quality-bridge-audit2"
     if st.session_state.get("simulator_state_version") != simulator_state_version:
         for old_key in list(st.session_state.keys()):
-            if str(old_key).startswith("simt_") or old_key=="sim_prod_mode":
+            if str(old_key).startswith("simt_") or str(old_key).startswith("sim_oee_") or old_key=="sim_prod_mode":
                 st.session_state.pop(old_key,None)
         for name in lever_names:
             st.session_state[f"simt_{name}"]=float(B[name])
+        # Se o OEE agregado divergir ligeiramente do produto dos agregados, usamos a identidade causal como baseline do simulador.
+        st.session_state.simt_oee=float((B["availability"]/100)*min(B["performance"]/100,1.0)*(B["quality"]/100)*100)
+        st.session_state.sim_oee_edit_source="baseline"
+        st.session_state.sim_oee_reconcile_note=""
         st.session_state.simulator_state_version=simulator_state_version
 
     for name in lever_names:
         key=f"simt_{name}"
         if key not in st.session_state:
             st.session_state[key]=float(B[name])
-
+    if "sim_oee_edit_source" not in st.session_state:
+        st.session_state.sim_oee_edit_source="baseline"
+    if "sim_oee_reconcile_note" not in st.session_state:
+        st.session_state.sim_oee_reconcile_note=""
     if "sim_group" not in st.session_state:
         st.session_state.sim_group="Produção"
 
-    with st.container(border=True):
-        c1,c2,c3=st.columns([1,.34,.34],gap="small")
-        with c1:
-            st.markdown(
-                "<div class='sim-header'><div>"
-                "<div class='sim-header-title'>Simulador Atual → Meta</div>"
-                "<div class='sim-header-sub'>Informe o valor-meta de cada driver. O sistema calcula automaticamente variação, OEE projetado, capacidade e impacto financeiro.</div>"
-                "</div><div><span class='sim-scope-chip'>DRIVERS + OEE CALCULADO</span></div></div>",
-                unsafe_allow_html=True
-            )
-        with c2:
-            if st.button("Cenário exemplo",use_container_width=True):
-                for name in lever_names:
-                    st.session_state[f"simt_{name}"]=float(example_targets[name])
-                st.rerun()
-        with c3:
-            if st.button("Resetar para atual",use_container_width=True):
-                for name in lever_names:
-                    st.session_state[f"simt_{name}"]=float(B[name])
-                st.rerun()
+    def _oee_product_pct():
+        a=float(np.clip(float(st.session_state.get("simt_availability",B["availability"]))/100,0.01,0.99))
+        p=float(np.clip(float(st.session_state.get("simt_performance",B["performance"]))/100,0.01,1.05))
+        q=float(np.clip(float(st.session_state.get("simt_quality",B["quality"]))/100,0.01,1.0))
+        return float(np.clip(a*min(p,1.0)*q,0.01,0.99))*100
 
-    def target_input(label,name,current,unit="",step=0.1,min_value=0.0,max_value=None,fmt="%.2f",help_text=None):
-        kwargs={"label":label,"key":f"simt_{name}","step":float(step),"format":fmt}
-        if min_value is not None:
-            kwargs["min_value"]=float(min_value)
-        if max_value is not None:
-            kwargs["max_value"]=float(max_value)
-        if help_text:
-            kwargs["help"]=help_text
-        st.number_input(**kwargs)
-        target=float(st.session_state[f"simt_{name}"])
-        delta=target-current
-        if unit=="%":
-            d=f"{delta:+.1f} pp"
-            current_txt=f"{current:.1f}%"
-            target_txt=f"{target:.1f}%"
-        elif unit=="R$":
-            d=fmt_money(delta,2)
-            current_txt=fmt_money(current,2)
-            target_txt=fmt_money(target,2)
-        elif unit=="R$/un":
-            d=f"R$ {delta:+,.2f}".replace(",",".")
-            current_txt=f"R$ {current:,.2f}".replace(",",".")
-            target_txt=f"R$ {target:,.2f}".replace(",",".")
+    def _sync_oee_from_drivers():
+        st.session_state.simt_oee=_oee_product_pct()
+        st.session_state.sim_oee_edit_source="drivers"
+        st.session_state.sim_oee_reconcile_note="OEE recalculado automaticamente a partir dos drivers alterados."
+
+    def _sync_oee_from_quality():
+        # No modelo canônico atual, Qualidade OEE = Good/Total = 1 - Refugo.
+        # Editar o driver de Qualidade atualiza a alavanca Refugo para não criar cenários contraditórios.
+        q=float(np.clip(float(st.session_state.get("simt_quality",B["quality"])),1.0,100.0))
+        st.session_state.simt_scrap=max(0.0,100.0-q)
+        st.session_state.simt_oee=_oee_product_pct()
+        st.session_state.sim_oee_edit_source="drivers"
+        st.session_state.sim_oee_reconcile_note="Qualidade OEE, Refugo e OEE foram reconciliados automaticamente."
+
+    def _sync_quality_from_scrap():
+        scrap=float(np.clip(float(st.session_state.get("simt_scrap",B["scrap"])),0.0,99.0))
+        st.session_state.simt_quality=max(1.0,100.0-scrap)
+        st.session_state.simt_oee=_oee_product_pct()
+        st.session_state.sim_oee_edit_source="drivers"
+        st.session_state.sim_oee_reconcile_note="Refugo, Qualidade OEE e OEE foram reconciliados automaticamente."
+
+    def _sync_drivers_from_oee():
+        target=float(np.clip(float(st.session_state.get("simt_oee",B["oee"]))/100,0.01,0.99))
+        a=float(np.clip(float(st.session_state.get("simt_availability",B["availability"]))/100,0.01,0.99))
+        p=float(np.clip(float(st.session_state.get("simt_performance",B["performance"]))/100,0.01,1.05))
+        q=float(np.clip(float(st.session_state.get("simt_quality",B["quality"]))/100,0.01,1.0))
+        adjusted=[]
+
+        # Performance é o balanceador primário por ser o driver com maior flexibilidade de curto prazo.
+        p_req=target/max(a*q,1e-9)
+        if 0.01 <= p_req <= 1.0:
+            p=p_req; adjusted.append("Performance")
         else:
-            d=f"{delta:+,.2f}".replace(",",".")
-            current_txt=f"{current:,.2f}".replace(",",".")
-            target_txt=f"{target:,.2f}".replace(",",".")
-            if unit:
-                current_txt+=f" {unit}"
-                target_txt+=f" {unit}"
-                d+=f" {unit}"
-        st.caption(f"Atual {current_txt} → Meta {target_txt} · Δ {d}")
-        return target
+            p=float(np.clip(p_req,0.01,1.0)); adjusted.append("Performance")
+            a_req=target/max(p*q,1e-9)
+            if 0.01 <= a_req <= 0.99:
+                a=a_req; adjusted.append("Disponibilidade")
+            else:
+                a=float(np.clip(a_req,0.01,0.99)); adjusted.append("Disponibilidade")
+                q_req=target/max(a*p,1e-9)
+                q=float(np.clip(q_req,0.01,1.0)); adjusted.append("Qualidade")
 
-    def projected_oee_from_state():
+        st.session_state.simt_availability=a*100
+        st.session_state.simt_performance=p*100
+        st.session_state.simt_quality=q*100
+        st.session_state.simt_scrap=max(0.0,100.0-q*100)
+        reconciled=_oee_product_pct()
+        st.session_state.simt_oee=reconciled
+        st.session_state.sim_oee_edit_source="oee"
+        if abs(reconciled-target*100)<=0.05:
+            st.session_state.sim_oee_reconcile_note="Meta de OEE reconciliada automaticamente ajustando " + " + ".join(dict.fromkeys(adjusted)) + "."
+        else:
+            st.session_state.sim_oee_reconcile_note=f"Meta limitada pelos limites físicos dos drivers. OEE reconciliado em {reconciled:.1f}%."
+
+    def _sync_oee_from_process():
         base_avail=max(0.0001,float(D.get("availability",0.0001)))
-        base_quality=max(0.0001,float(D.get("quality",1.0)))
         setup_target=float(st.session_state.get("simt_setup",B["setup"]))
         unplanned_target=float(st.session_state.get("simt_unplanned_hours",B["unplanned_hours"]))
         mttr_target=float(st.session_state.get("simt_mttr",B["mttr"]))
@@ -3636,16 +3824,63 @@ elif page == "Alavancas de Valor":
         unplanned_improvement=(B["unplanned_hours"]-unplanned_target)/max(B["unplanned_hours"],1e-9) if B["unplanned_hours"]>0 else 0
         mttr_improvement=(B["mttr"]-mttr_target)/max(B["mttr"],1e-9)
         downtime_share=max(0.0,1-base_avail)
-        process_recovery=downtime_share*(0.25*setup_improvement+0.45*unplanned_improvement+0.30*mttr_improvement)
-        derived_availability=float(np.clip(base_avail+process_recovery,0.01,0.99))
-        target_availability=float(np.clip(float(st.session_state.get("simt_availability",B["availability"]))/100,0.01,0.99))
-        effective_availability=max(target_availability,derived_availability)
-        effective_performance=float(np.clip(float(st.session_state.get("simt_performance",B["performance"]))/100,0.01,1.05))
-        base_scrap=float(B["scrap"])/100
-        target_scrap=float(st.session_state.get("simt_scrap",B["scrap"]))/100
-        quality_ratio=(1-target_scrap)/max(1-base_scrap,0.001)
-        effective_quality=float(np.clip(base_quality*quality_ratio,0.01,1.0))
-        return float(np.clip(effective_availability*min(effective_performance,1.0)*effective_quality,0.01,0.99))*100
+        recovery=downtime_share*(0.25*setup_improvement+0.45*unplanned_improvement+0.30*mttr_improvement)
+        st.session_state.simt_availability=float(np.clip(base_avail+recovery,0.01,0.99))*100
+        st.session_state.simt_oee=_oee_product_pct()
+        st.session_state.sim_oee_edit_source="process"
+        st.session_state.sim_oee_reconcile_note="Disponibilidade e OEE recalculados a partir de Setup, Paradas e MTTR."
+
+    with st.container(border=True):
+        c1,c2,c3=st.columns([1,.34,.34],gap="small")
+        with c1:
+            st.markdown(
+                "<div class='sim-header'><div>"
+                "<div class='sim-header-title'>Simulador Atual → Meta</div>"
+                "<div class='sim-header-sub'>Ajuste o OEE diretamente ou seus drivers. O sistema sincroniza os dois sentidos e mantém a identidade OEE = Disponibilidade × Performance × Qualidade.</div>"
+                "</div><div><span class='sim-scope-chip'>OEE RECONCILIADO · BRIDGE AUDITADO</span></div></div>",
+                unsafe_allow_html=True
+            )
+        with c2:
+            if st.button("Cenário exemplo",use_container_width=True):
+                for name in lever_names:
+                    st.session_state[f"simt_{name}"]=float(example_targets[name])
+                st.session_state.sim_oee_edit_source="drivers"
+                st.session_state.sim_oee_reconcile_note="Cenário exemplo construído pelos drivers."
+                st.rerun()
+        with c3:
+            if st.button("Resetar para atual",use_container_width=True):
+                for name in lever_names:
+                    st.session_state[f"simt_{name}"]=float(B[name])
+                st.session_state.simt_oee=float((B["availability"]/100)*min(B["performance"]/100,1.0)*(B["quality"]/100)*100)
+                st.session_state.sim_oee_edit_source="baseline"
+                st.session_state.sim_oee_reconcile_note=""
+                st.rerun()
+
+    def target_input(label,name,current,unit="",step=0.1,min_value=0.0,max_value=None,fmt="%.2f",help_text=None,on_change=None):
+        kwargs={"label":label,"key":f"simt_{name}","step":float(step),"format":fmt}
+        if min_value is not None:
+            kwargs["min_value"]=float(min_value)
+        if max_value is not None:
+            kwargs["max_value"]=float(max_value)
+        if help_text:
+            kwargs["help"]=help_text
+        if on_change:
+            kwargs["on_change"]=on_change
+        st.number_input(**kwargs)
+        target=float(st.session_state[f"simt_{name}"])
+        delta=target-current
+        if unit=="%":
+            d=f"{delta:+.1f} pp"; current_txt=f"{current:.1f}%"; target_txt=f"{target:.1f}%"
+        elif unit=="R$":
+            d=fmt_money(delta,2); current_txt=fmt_money(current,2); target_txt=fmt_money(target,2)
+        elif unit=="R$/un":
+            d=f"R$ {delta:+,.2f}".replace(",","."); current_txt=f"R$ {current:,.2f}".replace(",","."); target_txt=f"R$ {target:,.2f}".replace(",",".")
+        else:
+            d=f"{delta:+,.2f}".replace(",","."); current_txt=f"{current:,.2f}".replace(",","."); target_txt=f"{target:,.2f}".replace(",",".")
+            if unit:
+                current_txt+=f" {unit}"; target_txt+=f" {unit}"; d+=f" {unit}"
+        st.caption(f"Atual {current_txt} → Meta {target_txt} · Δ {d}")
+        return target
 
     left,right=st.columns([1.32,.68],gap="small")
     with left:
@@ -3655,55 +3890,69 @@ elif page == "Alavancas de Valor":
             st.markdown("---")
 
             if group=="Produção":
-                st.markdown("<div class='lever-kicker'>PRODUÇÃO</div><div class='lever-title'>Drivers de capacidade e eficiência — Atual → Meta</div>",unsafe_allow_html=True)
-                a,b=st.columns(2,gap="medium")
+                st.markdown("<div class='lever-kicker'>PRODUÇÃO</div><div class='lever-title'>OEE e seus drivers — um único cálculo, duas formas de ajuste</div>",unsafe_allow_html=True)
+
+                target_input("Meta simulada — OEE","oee",B["oee"],"%",.5,1,99,"%.1f",on_change=_sync_drivers_from_oee)
+                driver_product=_oee_product_pct()
+                st.markdown(
+                    f"<div class='lever-shell'><div class='lever-kicker'>IDENTIDADE DO OEE</div>"
+                    f"<div class='lever-title'>{st.session_state.simt_availability:.1f}% × {st.session_state.simt_performance:.1f}% × {st.session_state.simt_quality:.1f}% = {driver_product:.1f}%</div>"
+                    f"<div class='lever-meta'>OEE e produto dos drivers ficam sempre reconciliados. Última origem: {str(st.session_state.sim_oee_edit_source).replace('oee','OEE').replace('drivers','Drivers').replace('process','Processo').replace('baseline','Atual')}.</div></div>",
+                    unsafe_allow_html=True
+                )
+                if st.session_state.sim_oee_reconcile_note:
+                    st.caption(st.session_state.sim_oee_reconcile_note)
+
+                st.write("")
+                a,b,c=st.columns(3,gap="medium")
                 with a:
-                    target_input("Meta simulada — Disponibilidade","availability",B["availability"],"%",.5,0,100,"%.1f")
-                    target_input("Meta simulada — Performance","performance",B["performance"],"%",.5,0,105,"%.1f")
+                    target_input("Disponibilidade","availability",B["availability"],"%",.5,1,99,"%.1f",on_change=_sync_oee_from_drivers)
                 with b:
-                    target_input("Meta simulada — Capacidade utilizada","capacity",B["capacity"],"%",.5,0,100,"%.1f")
-                    projected_oee=projected_oee_from_state()
-                    oee_delta=projected_oee-B["oee"]
-                    target_oee_pct=float(D.get("target_oee",np.nan))*100 if pd.notna(D.get("target_oee",np.nan)) else np.nan
-                    st.markdown(
-                        f"<div class='lever-shell'><div class='lever-kicker'>OEE — RESULTADO CALCULADO</div>"
-                        f"<div class='lever-title'>{projected_oee:.1f}% projetado</div>"
-                        f"<div class='lever-meta'>Atual {B['oee']:.1f}% → Projetado {projected_oee:.1f}% · Δ {oee_delta:+.1f} pp"
-                        + (f" · Meta KPI {target_oee_pct:.1f}%" if pd.notna(target_oee_pct) else "")
-                        + "</div></div>",
-                        unsafe_allow_html=True
-                    )
-                st.markdown("<div class='frontend-note'><b>OEE não é mais um campo editável.</b> Ele é calculado automaticamente a partir de Disponibilidade × Performance × Qualidade. A Qualidade acompanha a meta de refugo definida no grupo Qualidade. Setup, paradas e MTTR atuam como drivers de Disponibilidade sem criar um segundo caminho de OEE.</div>",unsafe_allow_html=True)
+                    target_input("Performance","performance",B["performance"],"%",.5,1,100,"%.1f",on_change=_sync_oee_from_drivers)
+                with c:
+                    target_input("Qualidade OEE","quality",B["quality"],"%",.5,1,100,"%.1f",on_change=_sync_oee_from_quality)
+
+                st.write("")
+                target_input("Meta simulada — Capacidade utilizada","capacity",B["capacity"],"%",.5,0,100,"%.1f")
+                st.markdown(
+                    "<div class='frontend-note'><b>Regra:</b> você pode editar o OEE ou qualquer driver sem escolher um modo. "
+                    "Ao editar OEE, o sistema usa Performance como balanceador primário e só ajusta outro driver se necessário. "
+                    "Ao editar Disponibilidade, Performance ou Qualidade, o OEE é recalculado. Qualidade OEE e Refugo permanecem sincronizados. "
+                    "OEE e capacidade habilitam produção; o valor só entra no EBITDA quando o volume é efetivamente vendido.</div>",
+                    unsafe_allow_html=True
+                )
 
             elif group=="Qualidade":
                 st.markdown("<div class='lever-kicker'>QUALIDADE</div><div class='lever-title'>Yield, desperdício e retrabalho</div>",unsafe_allow_html=True)
                 a,b=st.columns(2,gap="medium")
                 with a:
-                    target_input("Meta simulada — Refugo","scrap",B["scrap"],"%",.1,0,30,"%.1f")
+                    target_input("Meta simulada — Refugo","scrap",B["scrap"],"%",.1,0,30,"%.1f",on_change=_sync_quality_from_scrap)
                 with b:
                     target_input("Meta simulada — Retrabalho","rework",B["rework"],"%",.1,0,30,"%.1f")
-                st.markdown("<div class='frontend-note'>Refugo atua no consumo de insumos; retrabalho atua em MOD e energia. Os efeitos são encadeados para reduzir dupla contagem.</div>",unsafe_allow_html=True)
+                st.markdown("<div class='frontend-note'>Qualidade OEE mede a yield do OEE e, no modelo atual, permanece sincronizada com Refugo (Qualidade = 100% - Refugo). Retrabalho continua uma alavanca econômica específica sobre MOD e energia. O motor não soma a capacidade do OEE novamente ao EBITDA.</div>",unsafe_allow_html=True)
 
             elif group=="Processo":
                 st.markdown("<div class='lever-kicker'>PROCESSO</div><div class='lever-title'>Tempo disponível e confiabilidade</div>",unsafe_allow_html=True)
                 a,b=st.columns(2,gap="medium")
                 with a:
-                    target_input("Meta simulada — Setup médio","setup",B["setup"],"min",1,0,max(240,B["setup"]*2),"%.0f")
-                    target_input("Meta simulada — MTTR","mttr",B["mttr"],"min",1,0,max(300,B["mttr"]*2),"%.0f")
+                    target_input("Meta simulada — Setup médio","setup",B["setup"],"min",1,0,max(240,B["setup"]*2),"%.0f",on_change=_sync_oee_from_process)
+                    target_input("Meta simulada — MTTR","mttr",B["mttr"],"min",1,0,max(300,B["mttr"]*2),"%.0f",on_change=_sync_oee_from_process)
                 with b:
-                    target_input("Meta simulada — Paradas não planejadas","unplanned_hours",B["unplanned_hours"],"h",1,0,max(1,B["unplanned_hours"]*2),"%.0f")
-                    st.markdown("<div class='frontend-note'>Setup, paradas e MTTR são drivers de disponibilidade. Eles habilitam capacidade e não são somados novamente como EBITDA se o volume já monetiza essa capacidade.</div>",unsafe_allow_html=True)
+                    target_input("Meta simulada — Paradas não planejadas","unplanned_hours",B["unplanned_hours"],"h",1,0,max(1,B["unplanned_hours"]*2),"%.0f",on_change=_sync_oee_from_process)
+                    st.markdown(f"<div class='lever-shell'><div class='lever-kicker'>DISPONIBILIDADE RESULTANTE</div><div class='lever-title'>{st.session_state.simt_availability:.1f}%</div><div class='lever-meta'>OEE reconciliado {st.session_state.simt_oee:.1f}%</div></div>",unsafe_allow_html=True)
+                st.markdown("<div class='frontend-note'>Setup, Paradas e MTTR são subdrivers de Disponibilidade. Ao alterá-los, o simulador atualiza Disponibilidade e OEE; eles continuam sendo valor habilitado, não EBITDA aditivo.</div>",unsafe_allow_html=True)
 
             elif group=="Pessoas":
                 st.markdown("<div class='lever-kicker'>PESSOAS</div><div class='lever-title'>Horas, produtividade e dimensionamento</div>",unsafe_allow_html=True)
                 a,b=st.columns(2,gap="medium")
                 with a:
                     target_input("Meta simulada — Horas extras","overtime_hours",B["overtime_hours"],"h",10,0,max(100,B["overtime_hours"]*2),"%.0f")
-                    target_input("Meta simulada — Produtividade","productivity",B["productivity"],"un/h eq.",.1,.1,max(50,B["productivity"]*2),"%.1f",
-                                 "No consolidado multiproduto o ganho deve ser linearizado por HH padrão.")
+                    prod_unit=B.get("productivity_unit","un/h eq.")
+                    target_input(f"Meta simulada — Produtividade ({prod_unit})","productivity",B["productivity"],prod_unit,.5,.1,max(200,B["productivity"]*2),"%.1f",
+                                 "Quando há padrão por produto, o consolidado usa eficiência de HH padrão, evitando distorção de mix.")
                 with b:
                     target_input("Meta simulada — Headcount","headcount",B["headcount"],"pessoas",1,0,max(10,B["headcount"]*2),"%.0f")
-                    st.markdown("<div class='frontend-note'>Hora extra usa o custo/hora real da MOD e somente o adicional configurado. Headcount é tratado como driver da estrutura; se Custo Fixo também for alterado, o motor evita somar os dois.</div>",unsafe_allow_html=True)
+                    st.markdown("<div class='frontend-note'>Hora extra usa custo/hora real da MOD e adicional configurável. Headcount é driver de estrutura; se Custo Fixo também for alterado, o motor evita somar os dois.</div>",unsafe_allow_html=True)
 
             elif group=="Materiais":
                 st.markdown("<div class='lever-kicker'>MATERIAIS</div><div class='lever-title'>Consumo, preço e perdas de insumos</div>",unsafe_allow_html=True)
@@ -3713,12 +3962,12 @@ elif page == "Alavancas de Valor":
                     target_input("Meta simulada — Perdas de material","material_loss_pct",B["material_loss_pct"],"%",.1,0,30,"%.1f")
                 with b:
                     target_input(f"Meta simulada — Preço de MP ({B['mp_price_unit']})","mp_price",B["mp_price"],B["mp_price_unit"],.01,0,max(B["mp_price"]*2,2),"%.3f")
-                    st.markdown("<div class='frontend-note'>Quando a base trouxer kg e R$/kg, o simulador usa valores físicos. Se não houver, trabalha com índice 1,00 até o DE/PARA receber os dados reais.</div>",unsafe_allow_html=True)
+                    st.markdown("<div class='frontend-note'>Os efeitos de MP são encadeados: Volume → Refugo → Consumo específico → Preço → Perdas. Assim o Bridge não conta a mesma economia duas vezes.</div>",unsafe_allow_html=True)
 
             elif group=="Energia":
                 st.markdown("<div class='lever-kicker'>ENERGIA</div><div class='lever-title'>Intensidade energética da operação</div>",unsafe_allow_html=True)
                 target_input(f"Meta simulada — kWh/unidade ({B['energy_unit']})","energy_intensity",B["energy_intensity"],B["energy_unit"],.01,0,max(B["energy_intensity"]*2,2),"%.3f")
-                st.markdown("<div class='frontend-note'>O custo de energia acompanha o volume e a intensidade energética simulada. Retrabalho também afeta o consumo.</div>",unsafe_allow_html=True)
+                st.markdown("<div class='frontend-note'>O custo acompanha o volume, o retrabalho e a intensidade energética. O Bridge reconhece apenas a variação incremental depois desses efeitos.</div>",unsafe_allow_html=True)
 
             elif group=="Logística":
                 st.markdown("<div class='lever-kicker'>LOGÍSTICA</div><div class='lever-title'>Frete em GGF e proteção de receita</div>",unsafe_allow_html=True)
@@ -3727,7 +3976,7 @@ elif page == "Alavancas de Valor":
                     target_input("Meta simulada — Frete/unidade","freight_per_unit",B["freight_per_unit"],"R$/un",.01,0,max(1,B["freight_per_unit"]*3),"%.2f")
                 with b:
                     target_input("Meta simulada — OTIF","otif",B["otif"],"%",.5,0,100,"%.1f")
-                st.markdown("<div class='frontend-note'><b>Frete:</b> entra em GGF na DRE Gerencial. <b>OTIF:</b> gera receita protegida / risco evitado e não é somado automaticamente à receita ou ao EBITDA.</div>",unsafe_allow_html=True)
+                st.markdown("<div class='frontend-note'><b>Frete:</b> GGF e EBITDA. <b>OTIF:</b> receita protegida/risco evitado; fica fora da Receita e do EBITDA automáticos.</div>",unsafe_allow_html=True)
 
             elif group=="Financeiro":
                 st.markdown("<div class='lever-kicker'>FINANCEIRO</div><div class='lever-title'>Preço, mix e volume — cálculo encadeado</div>",unsafe_allow_html=True)
@@ -3737,7 +3986,7 @@ elif page == "Alavancas de Valor":
                     target_input("Meta simulada — Volume vendido","volume_units",B["volume_units"],"un",100,0,max(B["volume_units"]*3,1000),"%.0f")
                 with b:
                     target_input("Meta simulada — Efeito de mix na margem","mix_pp",B["mix_pp"],"pp",.1,-20,20,"%.1f")
-                    st.markdown("<div class='frontend-note'><b>Regra:</b> Receita simulada = Volume simulado × Preço simulado. O efeito de preço incide sobre o volume do cenário, eliminando o erro de somar percentuais independentes sobre a mesma receita base.</div>",unsafe_allow_html=True)
+                    st.markdown("<div class='frontend-note'><b>Regra:</b> Receita simulada = Volume simulado × Preço simulado. O efeito de preço incide sobre o volume do cenário. O mix aparece explicitamente na DRE simulada.</div>",unsafe_allow_html=True)
 
             elif group=="Estrutura":
                 st.markdown("<div class='lever-kicker'>ESTRUTURA</div><div class='lever-title'>Custos estruturais em valor absoluto</div>",unsafe_allow_html=True)
@@ -3746,7 +3995,7 @@ elif page == "Alavancas de Valor":
                     target_input("Meta simulada — Custos Fixos Industriais","fixed_industrial",B["fixed_industrial"],"R$",1000,0,max(B["fixed_industrial"]*3,1000),"%.0f")
                 with b:
                     target_input("Meta simulada — GGF Contratos/Serviços","contracts_services",B["contracts_services"],"R$",1000,0,max(B["contracts_services"]*3,1000),"%.0f")
-                st.markdown("<div class='frontend-note'>Contratos/serviços ficam dentro de GGF. Custo fixo industrial é uma linha separada da DRE. Headcount não é somado duas vezes se a meta de custo fixo já incorporar esse efeito.</div>",unsafe_allow_html=True)
+                st.markdown("<div class='frontend-note'>Contratos/serviços ficam em GGF. Custo fixo industrial é separado. Se o custo fixo for editado, Headcount vira driver explicativo e não é somado novamente.</div>",unsafe_allow_html=True)
 
             elif group=="Capital":
                 st.markdown("<div class='lever-kicker'>CAPITAL</div><div class='lever-title'>Dias de capital de giro</div>",unsafe_allow_html=True)
@@ -3759,68 +4008,58 @@ elif page == "Alavancas de Valor":
                     st.markdown("<div class='frontend-note'>Capital de giro é calculado em caixa e permanece fora do EBITDA.</div>",unsafe_allow_html=True)
 
     targets={name:float(st.session_state[f"simt_{name}"]) for name in lever_names}
-    R=calculate_simulator_scenario(D,targets)
+    R=calculate_simulator_scenario(D,targets,st.session_state.get("sim_oee_edit_source","drivers"))
 
-    active_count=sum(1 for name in lever_names if abs(targets[name]-float(B[name]))>1e-8)
+    changed=[name for name in lever_names if abs(targets[name]-float(B[name]))>1e-8]
+    active_count=len(changed)
 
     with right:
         with st.container(border=True):
-            panel_title("Impacto do Cenário",f"{active_count} alavancas alteradas em relação ao atual")
+            panel_title("Impacto do Cenário",f"{active_count} parâmetros alterados em relação ao atual")
             c1,c2=st.columns(2,gap="small")
             with c1:
                 st.markdown(
                     f"<div class='sim-card'><div class='sim-card-label'>Receita simulada</div>"
                     f"<div class='sim-card-value'>{fmt_money(R['simulated_revenue'])}</div>"
-                    f"<div class='sim-card-delta' style='color:{GREEN if R['revenue_gain']>=0 else RED}'>Δ {fmt_money(R['revenue_gain'])}</div></div>",
-                    unsafe_allow_html=True
-                )
+                    f"<div class='sim-card-delta' style='color:{GREEN if R['revenue_gain']>=0 else RED}'>Δ {fmt_money(R['revenue_gain'])}</div></div>",unsafe_allow_html=True)
             with c2:
                 st.markdown(
                     f"<div class='sim-card'><div class='sim-card-label'>EBITDA simulado</div>"
                     f"<div class='sim-card-value'>{fmt_money(R['simulated_ebitda'])}</div>"
-                    f"<div class='sim-card-delta' style='color:{GREEN if R['ebitda_gain']>=0 else RED}'>Δ {fmt_money(R['ebitda_gain'])}</div></div>",
-                    unsafe_allow_html=True
-                )
+                    f"<div class='sim-card-delta' style='color:{GREEN if R['ebitda_gain']>=0 else RED}'>Δ {fmt_money(R['ebitda_gain'])}</div></div>",unsafe_allow_html=True)
             st.write("")
             c1,c2=st.columns(2,gap="small")
             with c1:
                 st.markdown(
                     f"<div class='sim-card'><div class='sim-card-label'>Margem Industrial</div>"
                     f"<div class='sim-card-value'>{fmt_pct(R['simulated_margin'])}</div>"
-                    f"<div class='sim-card-delta' style='color:{GREEN if R['simulated_margin']>=D['margin'] else RED}'>base {fmt_pct(D['margin'])}</div></div>",
-                    unsafe_allow_html=True
-                )
+                    f"<div class='sim-card-delta' style='color:{GREEN if R['simulated_margin']>=D['margin'] else RED}'>base {fmt_pct(D['margin'])}</div></div>",unsafe_allow_html=True)
             with c2:
                 st.markdown(
                     f"<div class='sim-card'><div class='sim-card-label'>Capital de giro</div>"
                     f"<div class='sim-card-value'>{fmt_money(R['working_capital_release'])}</div>"
-                    f"<div class='sim-card-delta' style='color:{BLUE}'>efeito caixa, fora EBITDA</div></div>",
-                    unsafe_allow_html=True
-                )
+                    f"<div class='sim-card-delta' style='color:{BLUE}'>efeito caixa, fora EBITDA</div></div>",unsafe_allow_html=True)
             st.write("")
             st.markdown(
                 f"<div class='lever-shell'><div class='lever-kicker'>OTIF</div>"
                 f"<div class='lever-title'>{'Receita protegida' if R['otif_protected_value']>=0 else 'Receita adicional em risco'}: {fmt_money(abs(R['otif_protected_value']))}</div>"
-                f"<div class='lever-meta'>Não entra automaticamente na Receita simulada ou EBITDA. Confiança: Média.</div></div>",
-                unsafe_allow_html=True
-            )
+                f"<div class='lever-meta'>Não entra automaticamente na Receita simulada ou EBITDA.</div></div>",unsafe_allow_html=True)
             st.write("")
             volume_note=""
             if R["requested_volume"]>R["realized_volume"]+1:
-                volume_note=f" · demanda solicitada limitada pela capacidade a {R['realized_volume']:,.0f} un".replace(",",".")
+                volume_note=f" · demanda limitada pela capacidade a {R['realized_volume']:,.0f} un".replace(",",".")
             st.markdown(
                 f"<div class='lever-shell'><div class='lever-kicker'>CAPACIDADE</div>"
                 f"<div class='lever-title'>Valor potencial habilitado: {fmt_money(R['capacity_value'])}</div>"
-                f"<div class='lever-meta'>OEE efetivo {R['effective_oee']:.1%} · potencial {R['potential_units']:,.0f} un{volume_note}. "
-                f"Capacidade não é somada novamente ao EBITDA.</div></div>".replace(",","."),
-                unsafe_allow_html=True
-            )
+                f"<div class='lever-meta'>OEE reconciliado {R['effective_oee']:.1%} · potencial {R['potential_units']:,.0f} un{volume_note}. Capacidade não é somada novamente ao EBITDA.</div></div>".replace(",","."),
+                unsafe_allow_html=True)
 
     st.write("")
     c1,c2=st.columns([1.08,.92],gap="small")
     with c1:
         with st.container(border=True):
-            panel_title("Bridge de EBITDA","Reconciliado com a DRE simulada")
+            bridge_status="RECONCILIADO" if R["bridge_reconciled"] else "DIFERENÇA A REVISAR"
+            panel_title("Bridge de EBITDA",f"{bridge_status} · Σ impactos {fmt_money(R['bridge_total'])} · Δ EBITDA {fmt_money(R['ebitda_gain'])}")
             bridge=R["bridge"]
             if bridge:
                 x=["EBITDA Atual"]+list(bridge.keys())+["EBITDA Simulado"]
@@ -3828,21 +4067,18 @@ elif page == "Alavancas de Valor":
                 y=[D["ebitda"]]+list(bridge.values())+[0]
                 fig=go.Figure(go.Waterfall(
                     x=x,measure=measures,y=y,
-                    increasing={"marker":{"color":GREEN}},
-                    decreasing={"marker":{"color":RED}},
-                    totals={"marker":{"color":BLUE}},
-                    connector={"line":{"color":"#BBC8D3","width":1}}
+                    increasing={"marker":{"color":GREEN}},decreasing={"marker":{"color":RED}},
+                    totals={"marker":{"color":BLUE}},connector={"line":{"color":"#BBC8D3","width":1}}
                 ))
-                fig.update_layout(
-                    height=385,margin=dict(l=5,r=5,t=10,b=80),
-                    paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="rgba(0,0,0,0)",
-                    yaxis=dict(gridcolor="#EFF3F7",tickfont=dict(size=9)),
-                    xaxis=dict(tickfont=dict(size=9),tickangle=-25,automargin=True),
-                    showlegend=False
-                )
+                fig.update_layout(height=385,margin=dict(l=5,r=5,t=10,b=80),paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="rgba(0,0,0,0)",
+                                  yaxis=dict(gridcolor="#EFF3F7",tickfont=dict(size=9)),xaxis=dict(tickfont=dict(size=9),tickangle=-25,automargin=True),showlegend=False)
                 st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
             else:
                 st.info("O cenário está igual ao atual.")
+            if R["bridge_reconciled"]:
+                st.caption(f"✓ Bridge reconciliado com a DRE simulada. Diferença: {fmt_money(R['bridge_reconciliation_error'])}.")
+            else:
+                st.error(f"Bridge não reconciliou com a DRE. Diferença: {fmt_money(R['bridge_reconciliation_error'])}.")
 
     with c2:
         with st.container(border=True):
@@ -3851,87 +4087,67 @@ elif page == "Alavancas de Valor":
             if not show.empty:
                 show=show[show["Impacto_R$"].abs()>0.5].head(12)
                 show["Impacto"]=show["Impacto_R$"].map(lambda x:fmt_money(x))
-                show=show[["Alavanca","Tipo","Impacto","Confiança"]]
-                st.dataframe(show,use_container_width=True,hide_index=True,height=385)
+                st.dataframe(show[["Alavanca","Tipo","Impacto","Confiança"]],use_container_width=True,hide_index=True,height=385)
             else:
                 st.info("Nenhuma alavanca alterada.")
 
+    with st.expander("Auditoria do Bridge de EBITDA — o que entra e o que fica fora",expanded=False):
+        audit=R["bridge_audit"].copy()
+        audit["Valor"]=audit["Valor_R$"].map(lambda x:fmt_money(x))
+        st.dataframe(audit[["Componente","Entra no Bridge","Natureza","Valor","Regra"]],use_container_width=True,hide_index=True)
+        st.caption("O Bridge audita todas as parcelas aditivas da DRE, inclusive as que estão em zero no cenário. OEE, seus drivers, capacidade e processo são habilitadores e só monetizam via Volume vendido; OTIF é receita protegida; capital de giro é caixa. Manutenção, outros GGF e despesas permanecem na base porque ainda não possuem alavanca explícita nesta versão.")
+
     st.write("")
     with st.container(border=True):
-        panel_title("DRE — Base x Simulado","O cenário conversa diretamente com a DRE Gerencial")
+        panel_title("DRE — Base x Simulado","Todas as parcelas aditivas do Bridge reconciliam com o EBITDA simulado")
         dre_sim=R["simulated_dre"].copy()
         dre_sim["Δ"]=dre_sim["Simulado"]-dre_sim["Base"]
         for col in ["Base","Simulado","Δ"]:
             dre_sim[col]=dre_sim[col].map(lambda x:fmt_money(x))
-        st.dataframe(dre_sim,use_container_width=True,hide_index=True,height=500)
+        st.dataframe(dre_sim,use_container_width=True,hide_index=True,height=535)
 
     st.write("")
     with st.container(border=True):
         c1,c2=st.columns([1,.34],gap="small")
         with c1:
             st.markdown(
-                "<div class='frontend-note'><b>Regras do motor:</b> preço e volume são encadeados; frete está em GGF; "
-                "OTIF é receita protegida; custos e despesas vêm da DRE gerencial; OEE/capacidade são habilitadores; "
-                "capital de giro fica fora do EBITDA; Atual → Meta é a única forma de entrada do cenário.</div>",
-                unsafe_allow_html=True
-            )
+                "<div class='frontend-note'><b>Regras do motor:</b> OEE = A × P × Q em qualquer cenário; preço × volume são encadeados; "
+                "MP, MOD, energia e frete são calculados em waterfall; frete está em GGF; OTIF é receita protegida; OEE/capacidade/processo não são somados ao EBITDA; "
+                "capital de giro fica fora do EBITDA; Headcount e Custo Fixo não são somados duas vezes.</div>",unsafe_allow_html=True)
         with c2:
             if st.button("Transformar cenário em Plano de Captura",type="primary",use_container_width=True):
                 bd=R["breakdown"].copy()
                 if not bd.empty:
-                    top_actions=bd[
-                        (bd["Impacto_R$"]>1) &
-                        (bd["Tipo"].str.contains("EBITDA|Valor habilitado|GGF",regex=True))
-                    ].head(5)
+                    top_actions=bd[(bd["Impacto_R$"]>1) & (bd["Tipo"].str.contains("EBITDA|Valor habilitado|GGF",regex=True))].head(5)
                 else:
                     top_actions=pd.DataFrame()
 
                 owner_map={
-                    "OEE":"Ger. Industrial","Disponibilidade":"Ger. Manutenção","Performance":"Ger. Produção",
-                    "Capacidade utilizada":"Ger. Industrial","Setup médio":"Engenharia de Processos",
-                    "Paradas não planejadas":"Ger. Manutenção","MTTR":"Ger. Manutenção",
-                    "Refugo":"Ger. Qualidade","Retrabalho":"Ger. Qualidade",
-                    "Horas extras":"Ger. Produção","Produtividade":"Ger. Produção","Headcount":"Ger. Industrial",
-                    "Consumo específico MP":"Engenharia de Processos","Preço de MP":"Suprimentos",
-                    "Perdas de material":"Ger. Qualidade","kWh/unidade":"Ger. Industrial",
-                    "Frete/unidade":"Logística / Suprimentos","OTIF":"PCP / Logística",
-                    "Preço médio":"Comercial / CFO","Mix de produtos":"Comercial / CFO",
-                    "Volume vendido":"Comercial / Industrial","Custo fixo":"Diretor Industrial / CFO",
-                    "Contratos/serviços":"Suprimentos / CFO"
+                    "OEE":"Ger. Industrial","Disponibilidade":"Ger. Manutenção","Performance":"Ger. Produção","Qualidade OEE":"Ger. Qualidade",
+                    "Capacidade utilizada":"Ger. Industrial","Setup médio":"Engenharia de Processos","Paradas não planejadas":"Ger. Manutenção","MTTR":"Ger. Manutenção",
+                    "Refugo":"Ger. Qualidade","Retrabalho":"Ger. Qualidade","Horas extras":"Ger. Produção","Produtividade":"Ger. Produção","Headcount":"Ger. Industrial",
+                    "Consumo específico MP":"Engenharia de Processos","Preço de MP":"Suprimentos","Perdas de material":"Ger. Qualidade","kWh/unidade":"Ger. Industrial",
+                    "Frete/unidade":"Logística / Suprimentos","OTIF":"PCP / Logística","Preço médio":"Comercial / CFO","Mix de produtos":"Comercial / CFO",
+                    "Volume vendido":"Comercial / Industrial","Custo fixo":"Diretor Industrial / CFO","Contratos/serviços":"Suprimentos / CFO"
                 }
                 action_map={
-                    "OEE":"Executar plano para atingir a meta de OEE simulada.",
-                    "Disponibilidade":"Atacar perdas de disponibilidade e equipamentos críticos.",
-                    "Performance":"Eliminar perdas de velocidade e microparadas versus padrão.",
-                    "Capacidade utilizada":"Converter capacidade disponível em volume vendável sem aumentar estrutura desnecessária.",
-                    "Setup médio":"Aplicar SMED e preparação externa para atingir o setup meta.",
-                    "Paradas não planejadas":"Reduzir horas de paradas não planejadas com plano de confiabilidade.",
-                    "MTTR":"Reduzir tempo médio de reparo nas falhas críticas.",
-                    "Refugo":"Atacar causas de refugo até a meta simulada.",
-                    "Retrabalho":"Eliminar causas de retrabalho e estabilizar o processo.",
-                    "Horas extras":"Redimensionar escala e gargalos para atingir a meta de horas extras.",
-                    "Produtividade":"Rebalancear operação usando HH padrão e mix de produtos.",
-                    "Headcount":"Redesenhar capacidade e estrutura para o headcount simulado.",
-                    "Consumo específico MP":"Reduzir consumo real por unidade versus padrão.",
-                    "Preço de MP":"Renegociar/compor sourcing para atingir o preço-meta de insumo.",
-                    "Perdas de material":"Atacar perdas físicas fora do refugo de produto.",
-                    "kWh/unidade":"Reduzir intensidade energética por unidade.",
-                    "Frete/unidade":"Redesenhar malha/contratação para atingir o frete por unidade meta.",
-                    "Preço médio":"Executar estratégia comercial compatível com o preço médio meta.",
-                    "Mix de produtos":"Alterar mix para capturar a margem incremental simulada.",
-                    "Volume vendido":"Conectar capacidade disponível à demanda e ao volume vendido meta.",
-                    "Custo fixo":"Executar plano estrutural para atingir o custo fixo industrial meta.",
+                    "OEE":"Executar plano para atingir a meta de OEE reconciliada.","Disponibilidade":"Atacar perdas de disponibilidade e equipamentos críticos.",
+                    "Performance":"Eliminar perdas de velocidade e microparadas versus padrão.","Qualidade OEE":"Elevar o yield operacional até a meta de Qualidade OEE.",
+                    "Capacidade utilizada":"Converter capacidade disponível em volume vendável sem ampliar estrutura desnecessária.","Setup médio":"Aplicar SMED e preparação externa para atingir o setup meta.",
+                    "Paradas não planejadas":"Reduzir horas de paradas não planejadas com plano de confiabilidade.","MTTR":"Reduzir tempo médio de reparo nas falhas críticas.",
+                    "Refugo":"Atacar causas de refugo até a meta simulada.","Retrabalho":"Eliminar causas de retrabalho e estabilizar o processo.",
+                    "Horas extras":"Redimensionar escala e gargalos para atingir a meta de horas extras.","Produtividade":"Rebalancear operação usando HH padrão e mix de produtos.",
+                    "Headcount":"Redesenhar capacidade e estrutura para o headcount simulado.","Consumo específico MP":"Reduzir consumo real por unidade versus padrão.",
+                    "Preço de MP":"Renegociar/compor sourcing para atingir o preço-meta de insumo.","Perdas de material":"Atacar perdas físicas fora do refugo de produto.",
+                    "kWh/unidade":"Reduzir intensidade energética por unidade.","Frete/unidade":"Redesenhar malha/contratação para atingir o frete por unidade meta.",
+                    "Preço médio":"Executar estratégia comercial compatível com o preço médio meta.","Mix de produtos":"Alterar mix para capturar a margem incremental simulada.",
+                    "Volume vendido":"Conectar capacidade disponível à demanda e ao volume vendido meta.","Custo fixo":"Executar plano estrutural para atingir o custo fixo industrial meta.",
                     "Contratos/serviços":"Revisar contratos e serviços classificados em GGF."
                 }
                 new_rows=[]
                 for _,r in top_actions.iterrows():
-                    lever=str(r["Alavanca"])
-                    owner=owner_map.get(lever,"Gestão")
-                    new_rows.append([
-                        "Alta" if float(r["Impacto_R$"])>=100000 else "Média",
-                        lever,action_map.get(lever,f"Executar plano para atingir a meta simulada de {lever}."),
-                        owner,owner_email(owner),"30 dias",fmt_money(float(r["Impacto_R$"])),"Não iniciado"
-                    ])
+                    lever=str(r["Alavanca"]); owner=owner_map.get(lever,"Gestão")
+                    new_rows.append(["Alta" if float(r["Impacto_R$"])>=100000 else "Média",lever,action_map.get(lever,f"Executar plano para atingir a meta simulada de {lever}."),owner,owner_email(owner),"30 dias",fmt_money(float(r["Impacto_R$"])),"Não iniciado"])
                 if new_rows:
                     new=pd.DataFrame(new_rows,columns=st.session_state.actions.columns)
                     st.session_state.actions=pd.concat([st.session_state.actions,new],ignore_index=True)
@@ -4192,31 +4408,40 @@ elif page == "Configurações":
     with tabs[0]:
         st.markdown("### Industrial Performance Data Model")
         st.caption("O modelo padrão continua disponível como acelerador, mas o cliente não precisa mais adaptar seu Excel a ele: o DE/PARA faz a tradução.")
-        template = Path(__file__).parent / "Industrial_Performance_Input_Padrao_v063.xlsx"
+        template = Path(__file__).parent / "Industrial_Performance_Input_Padrao_v065.xlsx"
         if not template.exists():
-            template = Path(__file__).parent / "Industrial_Performance_Input_Padrao_v062.xlsx"
+            template = Path(__file__).parent / "Industrial_Performance_Input_Padrao_v0644.xlsx"
         if template.exists():
             st.download_button(
                 "Baixar modelo padrão de referência",
                 template.read_bytes(),
-                file_name="Industrial_Performance_Input_Padrao_v063.xlsx",
+                file_name="Industrial_Performance_Input_Padrao_v065.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 type="primary",
             )
         st.write("")
-        st.markdown("**Fluxo oficial v0.6.3:** RAW → Mapping / DE-PARA → Standard → Data Quality → Semantic / Gold → Performance Engine")
+        st.markdown("**Fluxo oficial v0.6.5:** RAW → Smart Read → Entity Resolution → Relationship Engine → DE/PARA → Standard → Data Quality → Semantic / Gold → Performance Engine")
 
     with tabs[1]:
         if st.session_state.real_data is not None:
-            st.success("O Performance Engine está usando dados importados e padronizados.")
+            mode=st.session_state.get("data_mode","importado")
+            if mode=="base_padrao":
+                st.info("O Performance Engine está usando a base padrão versionada, processada pelo mesmo Data Layer da Central de Dados.")
+            elif mode=="restaurado":
+                st.success("O Performance Engine restaurou a última ingestão ativa disponível neste ambiente.")
+            else:
+                st.success("O Performance Engine está usando dados importados e padronizados pela Central de Dados.")
             if st.session_state.get("idl_last_record"):
                 rec = st.session_state.idl_last_record
-                st.json({k: rec.get(k) for k in ["company", "source", "filename", "quality_score", "quality_status", "storage_mode"]})
-            if st.button("Voltar para dados demo", key="config_demo"):
+                st.json({k: rec.get(k) for k in ["company", "source", "filename", "quality_score", "quality_status", "storage_mode","version"]})
+            if st.button("Limpar ingestão ativa e usar base padrão", key="config_demo"):
+                idl.clear_active_ingestion()
                 st.session_state.real_data = None
+                st.session_state.data_mode = "demo"
+                st.session_state.pop("af_dataset_signature",None)
                 st.rerun()
         else:
-            st.info("O Performance Engine está usando dados demo.")
+            st.warning("Nenhuma base ativa. O app usará o demo interno apenas se a base padrão versionada não puder ser carregada.")
         if st.button("Abrir nova importação", key="config_open_central"):
             nav("Central de Dados")
 
@@ -4233,6 +4458,6 @@ elif page == "Configurações":
 
     with tabs[3]:
         st.markdown("### Persistência")
-        st.info("v0.6.3 usa DuckDB + Parquet e uma camada de abstração local para validar o produto. No Streamlit Cloud, o disco local é temporário e não deve guardar o histórico empresarial definitivo.")
+        st.info("v0.6.5 usa DuckDB + Parquet e ponteiro de ingestão ativa em uma camada de abstração local para validar o produto. No Streamlit Cloud, o disco local é temporário e não deve guardar o histórico empresarial definitivo.")
         st.markdown("**v0.8:** Object Storage (S3 / Azure Blob / R2) + PostgreSQL + engine analítico. O Industrial Performance Data Model e o Performance Engine permanecem os mesmos.")
 
