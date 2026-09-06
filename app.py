@@ -10,6 +10,7 @@ import base64
 from urllib.parse import quote
 
 import industrial_data_layer as idl
+import analytics_engine as ae
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -1973,19 +1974,98 @@ def nav(page):
     st.session_state.page = page
     st.rerun()
 
+
+def _analytics_prepare_state(data):
+    opts=ae.filter_options(data)
+    signature=(
+        tuple(opts.get("grupo",[])),tuple(opts.get("planta",[])),
+        tuple(opts.get("linha",[])),tuple(opts.get("produto",[])),
+        str(opts.get("date_min")),str(opts.get("date_max"))
+    )
+    if st.session_state.get("af_dataset_signature") != signature:
+        st.session_state.af_dataset_signature=signature
+        st.session_state.af_group="Todos"
+        st.session_state.af_plant="Todas"
+        st.session_state.af_line="Todas"
+        st.session_state.af_product="Todos"
+        if opts.get("date_min") is not None and opts.get("date_max") is not None:
+            st.session_state.af_period=(opts["date_min"].date(),opts["date_max"].date())
+        else:
+            st.session_state.af_period=()
+    st.session_state.analytics_filter_options=opts
+    return opts
+
+
+def _analytics_filters_from_state():
+    period=st.session_state.get("af_period",())
+    start=end=None
+    if isinstance(period,(tuple,list)) and len(period)>=2:
+        start,end=period[0],period[1]
+    elif period:
+        start=end=period
+    return {
+        "grupo":None if st.session_state.get("af_group","Todos")=="Todos" else st.session_state.get("af_group"),
+        "planta":None if st.session_state.get("af_plant","Todas")=="Todas" else st.session_state.get("af_plant"),
+        "linha":None if st.session_state.get("af_line","Todas")=="Todas" else st.session_state.get("af_line"),
+        "produto":None if st.session_state.get("af_product","Todos")=="Todos" else st.session_state.get("af_product"),
+        "start":start,"end":end,
+    }
+
+
 def page_header(title, subtitle):
-    c1,c2,c3,c4 = st.columns([1.05,1.05,.8,1.4], gap="small")
-    c1.selectbox("Grupo",["Grupo Industrial S.A."],label_visibility="collapsed",key=f"g_{title}")
-    c2.selectbox("Planta",["Planta São Paulo","Todas as plantas"],label_visibility="collapsed",key=f"p_{title}")
-    c3.selectbox("Período",["Ago/2026","Jul/2026","Jun/2026"],label_visibility="collapsed",key=f"d_{title}")
-    mode = "Dados importados" if st.session_state.real_data else "Dados demo"
-    c4.markdown(f'<div style="text-align:right;padding-top:.2rem"><span class="data-badge">{mode}</span></div>',unsafe_allow_html=True)
+    opts=st.session_state.get("analytics_filter_options",{})
+    has_real=bool(st.session_state.get("real_data"))
+    if has_real:
+        groups=["Todos"]+list(opts.get("grupo",[]))
+        plants=["Todas"]+list(opts.get("planta",[]))
+        lines=["Todas"]+list(opts.get("linha",[]))
+        products=["Todos"]+list(opts.get("produto",[]))
+
+        c1,c2,c3,c4,c5,c6=st.columns([.86,.92,.86,.92,1.28,.88],gap="small")
+        with c1:
+            st.selectbox("Grupo",groups,key="af_group",label_visibility="collapsed")
+        with c2:
+            st.selectbox("Planta",plants,key="af_plant",label_visibility="collapsed")
+        with c3:
+            st.selectbox("Linha",lines,key="af_line",label_visibility="collapsed")
+        with c4:
+            st.selectbox("Produto",products,key="af_product",label_visibility="collapsed")
+        with c5:
+            dmin=opts.get("date_min")
+            dmax=opts.get("date_max")
+            if dmin is not None and dmax is not None:
+                st.date_input(
+                    "Período",key="af_period",
+                    min_value=dmin.date(),max_value=dmax.date(),
+                    label_visibility="collapsed"
+                )
+            else:
+                st.caption("Período não disponível")
+        with c6:
+            context=ae.filter_context_label(_analytics_filters_from_state())
+            badge="Dados filtrados" if context!="Todos os dados" else "Dados importados"
+            st.markdown(f'<div style="text-align:right;padding-top:.2rem"><span class="data-badge">{badge}</span></div>',unsafe_allow_html=True)
+    else:
+        c1,c2,c3,c4,c5=st.columns([1,1,1,1,1.35],gap="small")
+        c1.selectbox("Grupo",["Grupo Industrial S.A."],disabled=True,label_visibility="collapsed",key=f"demo_g_{title}")
+        c2.selectbox("Planta",["Planta São Paulo"],disabled=True,label_visibility="collapsed",key=f"demo_p_{title}")
+        c3.selectbox("Linha",["Todas"],disabled=True,label_visibility="collapsed",key=f"demo_l_{title}")
+        c4.selectbox("Produto",["Todos"],disabled=True,label_visibility="collapsed",key=f"demo_pr_{title}")
+        c5.markdown('<div style="text-align:right;padding-top:.2rem"><span class="data-badge">Dados demo · filtros após importação</span></div>',unsafe_allow_html=True)
+
     st.markdown('<div class="eyebrow">EXECUÇÃO HOJE. COMPETITIVIDADE AMANHÃ.</div>',unsafe_allow_html=True)
     st.markdown(f'<div class="page-title">{title}</div>',unsafe_allow_html=True)
     st.markdown(f'<div class="page-subtitle">{subtitle}</div>',unsafe_allow_html=True)
 
+    meta=st.session_state.get("analytics_filter_meta",{})
+    if meta.get("empty"):
+        st.error("A combinação de filtros não possui registros de Produção. Os indicadores permanecem no último recorte válido até você ajustar os filtros.")
+    for warning in meta.get("warnings",[]):
+        st.warning(warning)
+
+
 def admin_header(title, subtitle):
-    st.markdown('<div class="eyebrow">INDUSTRIAL DATA LAYER · v0.6.3</div>', unsafe_allow_html=True)
+    st.markdown('<div class="eyebrow">INDUSTRIAL DATA + ANALYTICS · v0.6.4</div>', unsafe_allow_html=True)
     st.markdown(f'<div class="page-title">{title}</div>', unsafe_allow_html=True)
     st.markdown(f'<div class="page-subtitle">{subtitle}</div>', unsafe_allow_html=True)
 
@@ -2497,7 +2577,20 @@ if "actions" not in st.session_state:
         ["Média","Horas extras","Redimensionar turnos","Ger. Produção","","15/09/2026","R$ 88 mil","Em andamento"],
     ], columns=["Prioridade","Problema","Ação","Responsável","E-mail","Prazo","Impacto","Status"])
 
-D = calculate_real(st.session_state.real_data) if st.session_state.real_data else demo_dataset()
+_analytics_prepare_state(st.session_state.real_data)
+ACTIVE_FILTERS=_analytics_filters_from_state()
+FILTERED_DATA, FILTER_META=ae.apply_filters(st.session_state.real_data,ACTIVE_FILTERS)
+if st.session_state.real_data:
+    if FILTER_META.get("empty"):
+        ACTIVE_DATA=st.session_state.real_data
+        D=calculate_real(ACTIVE_DATA)
+    else:
+        ACTIVE_DATA=FILTERED_DATA
+        D=calculate_real(ACTIVE_DATA)
+else:
+    ACTIVE_DATA=None
+    D=demo_dataset()
+st.session_state.analytics_filter_meta=FILTER_META
 
 # ============================================================
 # SIDEBAR
@@ -2535,7 +2628,7 @@ with st.sidebar:
             if st.button(p, key=f"nav_{p}", type="primary" if st.session_state.page == p else "secondary", use_container_width=True):
                 nav(p)
 
-    st.markdown('<div class="sidebar-footer"><b>Da operação ao resultado.</b><br><small>PESSOAS &nbsp;&nbsp; DADOS &nbsp;&nbsp; AÇÃO</small></div>', unsafe_allow_html=True)
+    st.markdown('<div class="sidebar-footer"><b>Da operação ao resultado.</b><br><small>DADOS &nbsp;&nbsp; PERFORMANCE &nbsp;&nbsp; VALOR</small></div>', unsafe_allow_html=True)
 
 # ============================================================
 # PAGES
@@ -2722,7 +2815,7 @@ if page == "Cockpit Executivo":
         nav("Agente de Performance")
 
 elif page == "Performance Operacional":
-    page_header("Performance Operacional","Eficiência, capacidade e perdas por linha.")
+    page_header("Performance Operacional","Eficiência, capacidade, perdas e drill-down do KPI até a causa.")
     lp = D["line_perf"].copy()
 
     c1,c2,c3,c4 = st.columns(4, gap="small")
@@ -2736,31 +2829,173 @@ elif page == "Performance Operacional":
 
     with c1:
         with st.container(border=True, height=375):
-            panel_title("OEE por Linha","Comparação com meta")
-            colors = [score_color(safe_div(v,D["target_oee"])-1) for v in lp["OEE"]]
-            fig = go.Figure(go.Bar(
-                x=lp["Linha"], y=lp["OEE"], marker_color=colors,
-                text=[fmt_pct(x) for x in lp["OEE"]], textposition="outside"
-            ))
-            fig.add_hline(y=D["target_oee"], line_dash="dot", line_color="#9AAABD", annotation_text="Meta")
-            fig.update_layout(height=300, margin=dict(l=0,r=0,t=8,b=0),
-                              paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                              yaxis=dict(tickformat=".0%", gridcolor="#EFF3F7", range=[0,1]),
-                              xaxis=dict(showgrid=False), showlegend=False)
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar":False})
+            panel_title("OEE por Linha","Comparação com meta no recorte selecionado")
+            if not lp.empty:
+                colors = [score_color(safe_div(v,D["target_oee"])-1) for v in lp["OEE"]]
+                fig = go.Figure(go.Bar(
+                    x=lp["Linha"], y=lp["OEE"], marker_color=colors,
+                    text=[fmt_pct(x) for x in lp["OEE"]], textposition="outside"
+                ))
+                fig.add_hline(y=D["target_oee"], line_dash="dot", line_color="#9AAABD", annotation_text="Meta")
+                fig.update_layout(height=300, margin=dict(l=0,r=0,t=8,b=0),
+                                  paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                                  yaxis=dict(tickformat=".0%", gridcolor="#EFF3F7", range=[0,1]),
+                                  xaxis=dict(showgrid=False), showlegend=False)
+                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar":False})
+            else:
+                st.info("Sem linhas no recorte selecionado.")
 
     with c2:
         with st.container(border=True, height=375):
-            panel_title("Paradas x Gap de Produção","Quanto mais à direita e abaixo, pior")
-            fig = go.Figure(go.Scatter(
-                x=lp["Paradas h"], y=lp["Gap Produção"], mode="markers+text",
-                text=lp["Linha"], textposition="top center",
-                marker=dict(size=np.clip(lp["Paradas h"],16,42), color=BLUE, opacity=.78, line=dict(width=2,color="white"))
-            ))
-            fig.update_layout(height=300, margin=dict(l=0,r=0,t=8,b=0),
-                              paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                              xaxis=dict(gridcolor="#EFF3F7"), yaxis=dict(gridcolor="#EFF3F7"))
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar":False})
+            panel_title("Paradas x Gap de Produção","Localize linhas com perda de capacidade e volume")
+            if not lp.empty:
+                fig = go.Figure(go.Scatter(
+                    x=lp["Paradas h"], y=lp["Gap Produção"], mode="markers+text",
+                    text=lp["Linha"], textposition="top center",
+                    marker=dict(size=np.clip(lp["Paradas h"],16,42), color=BLUE, opacity=.78, line=dict(width=2,color="white"))
+                ))
+                fig.update_layout(height=300, margin=dict(l=0,r=0,t=8,b=0),
+                                  paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                                  xaxis=dict(gridcolor="#EFF3F7"), yaxis=dict(gridcolor="#EFF3F7"))
+                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar":False})
+            else:
+                st.info("Sem dados para o gráfico no recorte.")
+
+    st.write("")
+    with st.container(border=True):
+        panel_title("Drill-down de Performance","KPI → Linha → Máquina → Causa, preservando o recorte dos filtros globais")
+
+        kpi_options=["OEE","Disponibilidade","Produção","Refugo","Horas extras","Custo/unidade"]
+        line_options=["Todas"] + (lp["Linha"].astype(str).tolist() if not lp.empty else [])
+        c1,c2,c3,c4=st.columns([.9,1,1,1.1],gap="small")
+
+        with c1:
+            drill_kpi=st.selectbox("KPI",kpi_options,key="an_drill_kpi")
+        with c2:
+            drill_line=st.selectbox("Linha",line_options,key="an_drill_line")
+        selected_line=None if drill_line=="Todas" else drill_line
+
+        machine_df=ae.machine_drilldown(ACTIVE_DATA,D,selected_line)
+        machine_options=["Todas"] + (machine_df["Máquina"].astype(str).tolist() if not machine_df.empty else [])
+        with c3:
+            selected_machine_ui=st.selectbox(
+                "Máquina",
+                machine_options if drill_kpi in ["OEE","Disponibilidade","Produção"] else ["N/A"],
+                key="an_drill_machine",
+                disabled=drill_kpi not in ["OEE","Disponibilidade","Produção"]
+            )
+        selected_machine=None if selected_machine_ui in ["Todas","N/A"] else selected_machine_ui
+
+        cause_df=ae.cause_drilldown(ACTIVE_DATA,D,selected_line,selected_machine)
+        cause_options=["Todas"] + (cause_df["Causa"].astype(str).tolist() if not cause_df.empty else [])
+        with c4:
+            selected_cause_ui=st.selectbox(
+                "Causa",
+                cause_options if drill_kpi in ["OEE","Disponibilidade","Produção"] else ["N/A"],
+                key="an_drill_cause",
+                disabled=drill_kpi not in ["OEE","Disponibilidade","Produção"]
+            )
+        selected_cause=None if selected_cause_ui in ["Todas","N/A"] else selected_cause_ui
+
+        breadcrumb=[drill_kpi]
+        if selected_line:
+            breadcrumb.append(selected_line)
+        if selected_machine:
+            breadcrumb.append(selected_machine)
+        if selected_cause:
+            breadcrumb.append(selected_cause)
+        st.markdown(
+            "<div class='frontend-note'><b>Drill-down:</b> " + " → ".join(breadcrumb) + "</div>",
+            unsafe_allow_html=True
+        )
+
+        st.write("")
+        if drill_kpi in ["OEE","Disponibilidade","Produção"]:
+            a,b=st.columns([1,.95],gap="small")
+            with a:
+                panel_title("Máquinas — perda de disponibilidade","Horas de parada, eventos, MTTR e impacto estimado")
+                if machine_df.empty:
+                    st.info("A base não possui máquina + manutenção suficientes para este recorte.")
+                else:
+                    show_machine=machine_df.copy()
+                    show_machine["Paradas h"]=show_machine["Paradas h"].round(1)
+                    show_machine["MTTR min"]=show_machine["MTTR min"].round(0)
+                    show_machine["Impacto"]=show_machine["Impacto R$"].map(lambda x:fmt_money(x))
+                    show_machine=show_machine.drop(columns=["Impacto R$"])
+                    st.dataframe(show_machine,use_container_width=True,hide_index=True,height=285)
+            with b:
+                panel_title("Causas — Pareto do recorte","Causa dominante e impacto econômico estimado")
+                if cause_df.empty:
+                    st.info("A base não possui causas de manutenção estruturadas neste recorte.")
+                else:
+                    show_cause=cause_df.copy()
+                    show_cause["Paradas h"]=show_cause["Paradas h"].round(1)
+                    show_cause["% das horas"]=show_cause["% das horas"].map(lambda x:f"{x:.1%}")
+                    show_cause["Impacto"]=show_cause["Impacto R$"].map(lambda x:fmt_money(x))
+                    show_cause=show_cause.drop(columns=["Impacto R$"])
+                    st.dataframe(show_cause,use_container_width=True,hide_index=True,height=285)
+
+        elif drill_kpi=="Refugo":
+            qprod=ae.quality_product_drilldown(ACTIVE_DATA,selected_line)
+            if qprod.empty:
+                st.info("Sem granularidade de produto na Qualidade para este recorte.")
+            else:
+                st.caption("Para Refugo, o caminho correto disponível na base atual é KPI → Linha → Produto. Máquina/causa de qualidade só será afirmada quando essa dimensão existir na fonte.")
+                qshow=qprod.copy()
+                qshow["Taxa Refugo"]=qshow["Taxa Refugo"].map(lambda x:f"{x:.1%}")
+                st.dataframe(qshow,use_container_width=True,hide_index=True,height=300)
+
+        elif drill_kpi=="Horas extras":
+            if ACTIVE_DATA and "pessoas" in ACTIVE_DATA:
+                pe=ACTIVE_DATA["pessoas"].copy()
+                if not pe.empty and "horas_extras" in pe.columns:
+                    pe["horas_extras"]=pd.to_numeric(pe["horas_extras"],errors="coerce").fillna(0)
+                    dims=["linha"] if "linha" in pe.columns else []
+                    if "turno" in pe.columns:
+                        dims.append("turno")
+                    if dims:
+                        pshow=pe.groupby(dims,as_index=False)["horas_extras"].sum().sort_values("horas_extras",ascending=False)
+                        pshow=pshow.rename(columns={"linha":"Linha","turno":"Turno","horas_extras":"Horas extras"})
+                        st.dataframe(pshow,use_container_width=True,hide_index=True,height=300)
+                    else:
+                        st.info("A base de Pessoas não possui Linha/Turno para drill-down.")
+                else:
+                    st.info("Sem dados de horas extras no recorte.")
+            else:
+                st.info("Drill-down de Pessoas disponível após importação.")
+
+        elif drill_kpi=="Custo/unidade":
+            if ACTIVE_DATA and "custos" in ACTIVE_DATA:
+                cc=ACTIVE_DATA["custos"].copy()
+                if not cc.empty:
+                    cost_cols=[c for c in ["custo_mp","custo_mod","custo_energia","custo_manutencao","custo_frete","ggf_outros","custo_fixo"] if c in cc.columns]
+                    for col in cost_cols+["receita"]:
+                        if col in cc.columns:
+                            cc[col]=pd.to_numeric(cc[col],errors="coerce").fillna(0)
+                    dims=[c for c in ["linha","produto"] if c in cc.columns]
+                    if dims and cost_cols:
+                        cc["_custo"]=cc[cost_cols].sum(axis=1)
+                        cshow=cc.groupby(dims,as_index=False).agg(Custo=("_custo","sum"),Receita=("receita","sum"))
+                        cshow["Custo / Receita"]=cshow.apply(lambda r:safe_div(r["Custo"],r["Receita"]),axis=1)
+                        cshow=cshow.sort_values("Custo / Receita",ascending=False)
+                        cshow["Custo"]=cshow["Custo"].map(lambda x:fmt_money(x))
+                        cshow["Receita"]=cshow["Receita"].map(lambda x:fmt_money(x))
+                        cshow["Custo / Receita"]=cshow["Custo / Receita"].map(lambda x:f"{x:.1%}")
+                        st.dataframe(cshow,use_container_width=True,hide_index=True,height=300)
+                    else:
+                        st.info("Custos não possuem granularidade de Linha/Produto suficiente.")
+                else:
+                    st.info("Sem custos no recorte.")
+            else:
+                st.info("Drill-down de custos disponível após importação.")
+
+    st.write("")
+    with st.expander("Cobertura dos filtros no modelo de dados"):
+        coverage=st.session_state.get("analytics_filter_meta",{}).get("coverage")
+        if isinstance(coverage,pd.DataFrame) and not coverage.empty:
+            st.dataframe(coverage,use_container_width=True,hide_index=True)
+        else:
+            st.caption("Carregue dados reais para visualizar a cobertura dimensional de cada entidade.")
 
     st.write("")
     st.dataframe(lp, use_container_width=True, hide_index=True)
@@ -2770,6 +3005,7 @@ elif page == "Diagnóstico e Causas":
 
     diag=D["diagnostic"].copy()
     causes=D["causes"].copy()
+    engine=ae.performance_engine(ACTIVE_DATA,D,st.session_state.get("analytics_filter_meta"))
     worst=D["line_perf"].sort_values("OEE").iloc[0] if not D["line_perf"].empty else None
     top_lever=diag.iloc[0] if not diag.empty else None
     top_cause=causes.iloc[0] if not causes.empty else None
@@ -2790,6 +3026,43 @@ elif page == "Diagnóstico e Causas":
         st.markdown(f"<div style='font-size:.76rem;line-height:1.6;color:#34465C'>{D['diagnostic_conclusion']}</div>",unsafe_allow_html=True)
         if D.get("standards_missing"):
             st.warning("Há produtos sem padrão cadastrado: " + ", ".join(D["standards_missing"]) + ". A eficiência MOD não deve ser usada até completar o cadastro.")
+
+    st.write("")
+    with st.container(border=True):
+        panel_title("Performance Engine","Desvio → local → causa/evidência → impacto financeiro → alavanca → ação")
+        if engine.empty:
+            st.success("Nenhum desvio material foi identificado pelas regras determinísticas no recorte atual.")
+        else:
+            c1,c2,c3,c4=st.columns(4,gap="small")
+            top_engine=engine.iloc[0]
+            c1.metric("Desvios ativos",len(engine))
+            c2.metric("Maior impacto",fmt_money(float(top_engine["Impacto_R$"])))
+            c3.metric("KPI prioritário",str(top_engine["KPI"]))
+            c4.metric("Confiança",str(top_engine["Confiança"]))
+
+            st.write("")
+            view_engine=engine.copy()
+            view_engine["Impacto"]=view_engine["Impacto_R$"].map(lambda x:fmt_money(x))
+            view_engine=view_engine[[
+                "KPI","Desvio","Local","Causa / hipótese","Evidência",
+                "Alavanca","Ação recomendada","Impacto","Confiança","Fonte"
+            ]]
+            st.dataframe(
+                view_engine,use_container_width=True,hide_index=True,height=min(390,90+55*len(view_engine)),
+                column_config={
+                    "KPI":st.column_config.TextColumn("KPI",width="small"),
+                    "Desvio":st.column_config.TextColumn("Desvio",width="small"),
+                    "Local":st.column_config.TextColumn("Onde",width="medium"),
+                    "Causa / hipótese":st.column_config.TextColumn("Causa / hipótese",width="medium"),
+                    "Evidência":st.column_config.TextColumn("Evidência",width="large"),
+                    "Alavanca":st.column_config.TextColumn("Alavanca",width="medium"),
+                    "Ação recomendada":st.column_config.TextColumn("Ação recomendada",width="large"),
+                    "Impacto":st.column_config.TextColumn("Impacto",width="medium"),
+                    "Confiança":st.column_config.TextColumn("Confiança",width="small"),
+                    "Fonte":st.column_config.TextColumn("Fonte",width="medium"),
+                }
+            )
+            st.caption("O motor só afirma causa específica quando existe evidência na base. Quando a granularidade não existe, a coluna é tratada explicitamente como hipótese ou lacuna de dados.")
 
     st.write("")
     c1,c2=st.columns([1.10,.90],gap="small")

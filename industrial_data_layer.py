@@ -22,7 +22,7 @@ except Exception:  # pragma: no cover - fallback for static/offline validation
     duckdb = None
 
 
-DATA_LAYER_VERSION = "0.6.3.1"
+DATA_LAYER_VERSION = "0.6.4"
 IGNORE_ENTITY = "Ignorar"
 AUTO_UNIT = "Auto"
 NO_CONVERSION = "Sem conversão"
@@ -45,6 +45,7 @@ ENTITY_LABELS: Dict[str, str] = {
     "pessoas": "Pessoas",
     "custos": "Custos / Financeiro",
     "dre_gerencial": "DRE Gerencial",
+    "plano_contas_dre": "Plano de Contas DRE",
     "metas": "Metas",
     "padroes_produto": "Padrões de Produto",
     "parametros_diagnostico": "Parâmetros de Diagnóstico",
@@ -62,6 +63,7 @@ SHEET_ALIASES: Dict[str, List[str]] = {
     "pessoas": ["pessoas", "people", "mao_de_obra", "mão de obra", "labor", "horas", "headcount"],
     "custos": ["custos", "costs", "financeiro", "cost"],
     "dre_gerencial": ["dre_gerencial", "dre gerencial", "management_pnl", "pnl_gerencial", "resultado_gerencial", "dre", "pl", "resultado"],
+    "plano_contas_dre": ["plano_contas_dre", "plano contas dre", "plano_contas", "chart_of_accounts", "management_chart_of_accounts"],
     "metas": ["metas", "targets", "goals", "objetivos"],
     "padroes_produto": ["padroes_produto", "padrões_produto", "padroes", "standards", "product_standards", "roteiro"],
     "parametros_diagnostico": ["parametros_diagnostico", "diagnostico_parametros", "diagnostic_parameters"],
@@ -74,6 +76,7 @@ SHEET_ALIASES: Dict[str, List[str]] = {
 # unit is the internal expected unit for normalization.
 FIELD_SPECS: Dict[str, Dict[str, Dict[str, Any]]] = {
     "producao": {
+        "grupo": {"label": "Grupo", "priority": "optional", "dtype": "text", "aliases": ["grupo", "grupo_empresa", "grupo_industrial", "business_group"]},
         "data": {"label": "Data", "priority": "required", "dtype": "date", "aliases": ["data", "date", "dt", "dt_producao", "data_ref", "data_producao"]},
         "fabrica": {"label": "Fábrica / Planta", "priority": "recommended", "dtype": "text", "aliases": ["fabrica", "planta", "unidade", "site", "factory"]},
         "linha": {"label": "Linha", "priority": "required", "dtype": "text", "aliases": ["linha", "line", "workcenter", "work_center", "centro_trabalho", "celula", "célula", "recurso"]},
@@ -86,6 +89,8 @@ FIELD_SPECS: Dict[str, Dict[str, Dict[str, Any]]] = {
         "velocidade_nominal": {"label": "Velocidade Nominal", "priority": "required", "dtype": "number", "aliases": ["velocidade_nominal", "velocidade_padrao", "nominal_speed", "standard_speed", "vel_nominal"]},
     },
     "qualidade": {
+        "grupo": {"label": "Grupo", "priority": "optional", "dtype": "text", "aliases": ["grupo", "grupo_empresa", "grupo_industrial", "business_group"]},
+        "fabrica": {"label": "Fábrica / Planta", "priority": "optional", "dtype": "text", "aliases": ["fabrica", "planta", "unidade", "site", "factory"]},
         "data": {"label": "Data", "priority": "required", "dtype": "date", "aliases": ["data", "date", "dt", "data_qualidade"]},
         "linha": {"label": "Linha", "priority": "required", "dtype": "text", "aliases": ["linha", "line", "workcenter", "centro_trabalho", "celula"]},
         "produto": {"label": "Produto / SKU", "priority": "required", "dtype": "text", "aliases": ["produto", "sku", "product", "material", "item"]},
@@ -95,6 +100,8 @@ FIELD_SPECS: Dict[str, Dict[str, Dict[str, Any]]] = {
         "retrabalho": {"label": "Retrabalho", "priority": "recommended", "dtype": "number", "unit": "unidades", "aliases": ["retrabalho", "rework", "rework_qty", "qtd_retrabalho"]},
     },
     "manutencao": {
+        "grupo": {"label": "Grupo", "priority": "optional", "dtype": "text", "aliases": ["grupo", "grupo_empresa", "grupo_industrial", "business_group"]},
+        "fabrica": {"label": "Fábrica / Planta", "priority": "optional", "dtype": "text", "aliases": ["fabrica", "planta", "unidade", "site", "factory"]},
         "data": {"label": "Data", "priority": "required", "dtype": "date", "aliases": ["data", "date", "dt", "data_parada"]},
         "linha": {"label": "Linha", "priority": "required", "dtype": "text", "aliases": ["linha", "line", "workcenter", "centro_trabalho"]},
         "maquina": {"label": "Máquina / Equipamento", "priority": "required", "dtype": "text", "aliases": ["maquina", "equipamento", "machine", "equipment", "asset", "recurso"]},
@@ -103,6 +110,8 @@ FIELD_SPECS: Dict[str, Dict[str, Dict[str, Any]]] = {
         "causa": {"label": "Causa", "priority": "required", "dtype": "text", "aliases": ["causa", "motivo", "cause", "failure_cause", "raiz", "reason"]},
     },
     "pessoas": {
+        "grupo": {"label": "Grupo", "priority": "optional", "dtype": "text", "aliases": ["grupo", "grupo_empresa", "grupo_industrial", "business_group"]},
+        "fabrica": {"label": "Fábrica / Planta", "priority": "optional", "dtype": "text", "aliases": ["fabrica", "planta", "unidade", "site", "factory"]},
         "data": {"label": "Data", "priority": "required", "dtype": "date", "aliases": ["data", "date", "dt"]},
         "linha": {"label": "Linha", "priority": "required", "dtype": "text", "aliases": ["linha", "line", "workcenter", "centro_trabalho"]},
         "turno": {"label": "Turno", "priority": "recommended", "dtype": "text", "aliases": ["turno", "shift", "turma"]},
@@ -111,6 +120,8 @@ FIELD_SPECS: Dict[str, Dict[str, Dict[str, Any]]] = {
         "horas_extras": {"label": "Horas Extras", "priority": "required", "dtype": "number", "unit": "horas", "aliases": ["horas_extras", "overtime", "overtime_hours", "he", "hh_extra"]},
     },
     "custos": {
+        "grupo": {"label": "Grupo", "priority": "optional", "dtype": "text", "aliases": ["grupo", "grupo_empresa", "grupo_industrial", "business_group"]},
+        "fabrica": {"label": "Fábrica / Planta", "priority": "optional", "dtype": "text", "aliases": ["fabrica", "planta", "unidade", "site", "factory"]},
         "data": {"label": "Data", "priority": "required", "dtype": "date", "aliases": ["data", "date", "dt", "competencia"]},
         "linha": {"label": "Linha", "priority": "required", "dtype": "text", "aliases": ["linha", "line", "workcenter", "centro_custo", "cost_center"]},
         "produto": {"label": "Produto / SKU", "priority": "recommended", "dtype": "text", "aliases": ["produto", "sku", "product", "material", "item"]},
@@ -122,6 +133,9 @@ FIELD_SPECS: Dict[str, Dict[str, Dict[str, Any]]] = {
         "receita": {"label": "Receita", "priority": "required", "dtype": "number", "unit": "R$", "aliases": ["receita", "faturamento", "revenue", "sales", "net_revenue"]},
     },
     "dre_gerencial": {
+        "grupo": {"label": "Grupo", "priority": "optional", "dtype": "text", "aliases": ["grupo", "grupo_empresa", "grupo_industrial", "business_group"]},
+        "linha": {"label": "Linha", "priority": "optional", "dtype": "text", "aliases": ["linha", "line", "workcenter", "centro_trabalho"]},
+        "produto": {"label": "Produto / SKU", "priority": "optional", "dtype": "text", "aliases": ["produto", "sku", "product", "material", "item"]},
         "competencia": {"label": "Competência", "priority": "required", "dtype": "date", "aliases": ["competencia", "data", "date", "periodo", "period"]},
         "planta": {"label": "Planta / Unidade", "priority": "recommended", "dtype": "text", "aliases": ["planta", "fabrica", "unidade", "site", "factory"]},
         "receita_bruta": {"label": "Receita Bruta", "priority": "recommended", "dtype": "number", "unit": "R$", "aliases": ["receita_bruta", "gross_revenue", "faturamento_bruto"]},
@@ -146,6 +160,15 @@ FIELD_SPECS: Dict[str, Dict[str, Dict[str, Any]]] = {
         "estoque_dias": {"label": "Estoque (dias)", "priority": "optional", "dtype": "number", "unit": "dias", "aliases": ["estoque_dias", "inventory_days"]},
         "prazo_fornecedor_dias": {"label": "Prazo Fornecedor (dias)", "priority": "optional", "dtype": "number", "unit": "dias", "aliases": ["prazo_fornecedor_dias", "dpo", "supplier_days"]},
         "prazo_cliente_dias": {"label": "Prazo Cliente (dias)", "priority": "optional", "dtype": "number", "unit": "dias", "aliases": ["prazo_cliente_dias", "dso", "customer_days"]},
+    },
+    "plano_contas_dre": {
+        "campo_canonico": {"label": "Campo Canônico", "priority": "required", "dtype": "text", "aliases": ["campo_canonico", "canonical_field"]},
+        "grupo_dre": {"label": "Grupo DRE", "priority": "required", "dtype": "text", "aliases": ["grupo_dre", "dre_group"]},
+        "subgrupo": {"label": "Subgrupo", "priority": "recommended", "dtype": "text", "aliases": ["subgrupo", "subgroup"]},
+        "natureza": {"label": "Natureza", "priority": "recommended", "dtype": "text", "aliases": ["natureza", "nature"]},
+        "comportamento_default": {"label": "Comportamento Default", "priority": "recommended", "dtype": "text", "aliases": ["comportamento_default", "default_behavior"]},
+        "inclui_ebitda": {"label": "Inclui EBITDA", "priority": "recommended", "dtype": "text", "aliases": ["inclui_ebitda", "included_in_ebitda"]},
+        "observacao": {"label": "Observação", "priority": "optional", "dtype": "text", "aliases": ["observacao", "observação", "notes"]},
     },
     "metas": {
         "indicador": {"label": "Indicador", "priority": "required", "dtype": "text", "aliases": ["indicador", "kpi", "metric"]},
@@ -218,7 +241,7 @@ CORE_APPLY_REQUIREMENTS: Dict[str, List[str]] = {
 }
 
 DIMENSION_FIELDS = {
-    "fabrica", "linha", "produto", "maquina", "turno", "causa", "tipo_parada", "familia", "linha_padrao", "indicador", "area", "responsavel"
+    "grupo", "fabrica", "planta", "linha", "produto", "maquina", "turno", "causa", "tipo_parada", "familia", "linha_padrao", "indicador", "area", "responsavel"
 }
 
 UNIT_OPTIONS = [AUTO_UNIT, NO_CONVERSION, "segundos", "minutos", "horas", "kg", "toneladas", "unidades", "R$", "R$ mil", "% (0-100)", "decimal (0-1)"]

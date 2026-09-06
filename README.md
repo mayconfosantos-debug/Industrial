@@ -1,4 +1,4 @@
-# Industrial Performance — v0.6.3 Industrial Data Layer
+# Industrial Performance — v0.6.4 Analytics Engine
 
 ## Objetivo
 A v0.6.3 cria a camada de entrada de dados do Industrial Performance:
@@ -172,3 +172,45 @@ Receita Bruta
 = EBITDA
 
 O arquivo padrão v0.6.3.1 adiciona as abas **DRE_Gerencial** e **Plano_Contas_DRE**.
+
+
+## v0.6.4 — Analytics Engine
+
+### Filtros reais
+Os filtros do cabeçalho deixaram de ser ilustrativos. Em bases importadas, Grupo, Planta, Período, Linha e Produto recalculam o modelo quando a dimensão existe na entidade.
+
+O motor registra a cobertura de filtros por entidade. Quando uma dimensão não existe, o sistema não finge precisão:
+- a limitação aparece na cobertura;
+- a causalidade é rebaixada quando a fonte não suporta o recorte;
+- a DRE gerencial recebe tratamento específico para drill-down.
+
+### DRE gerencial em Linha / Produto
+Se a DRE_Gerencial estiver consolidada e o usuário filtrar Linha ou Produto, o Analytics Engine faz uma **alocação gerencial reconciliada** usando a participação do recorte na base detalhada de Custos/Produção.
+
+Custos fixos e despesas são rateados pelo peso do recorte e a interface avisa que se trata de uma visão analítica, não de uma DRE contábil legal.
+
+### Drill-down
+A tela Performance Operacional agora possui:
+- KPI → Linha → Máquina → Causa para OEE, Disponibilidade e Produção;
+- Linha → Produto para Refugo quando a base de qualidade não possui máquina/causa;
+- detalhamento de horas extras por Linha/Turno;
+- detalhamento de custos por Linha/Produto;
+- impacto financeiro estimado das perdas de manutenção.
+
+### Performance Engine
+Novo módulo `analytics_engine.py` com cadeia determinística:
+
+`KPI → Desvio → Local → Causa/Evidência → Impacto financeiro → Alavanca → Ação`
+
+O motor só afirma uma causa quando a granularidade da fonte suporta a afirmação. Caso contrário, mostra a lacuna de dados ou hipótese explicitamente.
+
+### Modelo padrão v0.6.4
+O Excel de exemplo foi atualizado para permitir testar:
+- Grupo;
+- Planta;
+- Período;
+- Linha;
+- Produto;
+- DRE Gerencial alinhada com a operação.
+
+`Plano_Contas_DRE` é tratado como entidade de referência própria e não contamina mais a DRE Gerencial no reconhecimento automático.
