@@ -22,7 +22,7 @@ except Exception:  # pragma: no cover - fallback for static/offline validation
     duckdb = None
 
 
-DATA_LAYER_VERSION = "0.6.5"
+DATA_LAYER_VERSION = "0.6.5.1"
 IGNORE_ENTITY = "Ignorar"
 AUTO_UNIT = "Auto"
 NO_CONVERSION = "Sem conversão"

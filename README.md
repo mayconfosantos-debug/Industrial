@@ -345,48 +345,8 @@ O release inclui:
 - `Industrial_Performance_Input_Padrao_v065.xlsx` — base padrão com 3 plantas + `Cadastro_Dimensoes`;
 - `Industrial_Performance_Teste_Semantico_v065.xlsx` — exemplo semi-estruturado com cabeçalho fora da linha 1 e Planta/Grupo no contexto.
 
-## v0.6.5 — OEE reconciliado + auditoria final do Bridge EBITDA
-
-### OEE: uma alavanca, um único cálculo
-- OEE volta a ser editável diretamente.
-- Disponibilidade, Performance e Qualidade OEE também podem ser editadas individualmente.
-- Não existe seletor `OEE direto` x `Drivers`.
-- O sistema mantém sempre a identidade `OEE = Disponibilidade × Performance × Qualidade`.
-- Se OEE for alterado, Performance é o balanceador primário; Disponibilidade e Qualidade só são ajustadas se necessário para atingir uma meta fisicamente possível.
-- Se qualquer driver for alterado, OEE é recalculado imediatamente.
-- Qualidade OEE e Refugo são sincronizados no modelo atual (`Qualidade = 100% - Refugo`) para impedir cenários contraditórios.
-- Setup, Paradas não planejadas e MTTR continuam sendo subdrivers de Disponibilidade e atualizam o OEE sem gerar um segundo motor.
-
-### Bridge de EBITDA — double check
-A auditoria agora mantém explicitamente todas as 15 parcelas aditivas, inclusive quando o valor no cenário é zero:
-1. Volume vendido
-2. Preço médio
-3. Mix
-4. Refugo
-5. Retrabalho
-6. Produtividade
-7. Horas extras
-8. Consumo específico de MP
-9. Preço de MP
-10. Perdas de material
-11. kWh/unidade
-12. Frete/unidade
-13. Contratos/serviços
-14. Custo fixo
-15. Headcount
-
-O gráfico mostra apenas impactos materiais, mas a tabela de auditoria mostra todas as parcelas. A soma do Bridge é comparada automaticamente ao Δ EBITDA da DRE simulada.
-
-Ficam explicitamente fora do EBITDA aditivo:
-- OEE / Disponibilidade / Performance / Qualidade / Capacidade: habilitam produção e monetizam via Volume vendido;
-- Setup / Paradas / MTTR: subdrivers de Disponibilidade;
-- OTIF: receita protegida;
-- Estoque / DPO / DSO: capital de giro / caixa;
-- GGF Manutenção, Outros GGF e Despesas: permanecem na base até existir uma alavanca explícita.
-
-Validações matemáticas realizadas na base padrão v0.6.5:
-- cenário neutro: Δ EBITDA = 0 e Bridge = 0;
-- cenário multi-alavancas: Bridge reconciliado com erro numérico ~R$ 0;
-- testes individuais dos drivers/alavancas: reconciliação do Bridge aprovada;
-- base padrão: OEE atual = A × P × Q sem divergência;
-- Qualidade OEE + Refugo = 100% no modelo atual.
+## v0.6.5.1 — Startup / Persistence Compatibility Hotfix
+- Corrige `AttributeError` quando `app.py` e `industrial_data_layer.py` chegam ao deploy fora de sincronia.
+- `load_active_ingestion`, `persist_ingestion` e `clear_active_ingestion` passam a ser APIs opcionais no piloto.
+- Ausência/falha da persistência local nunca derruba o app: o bootstrap segue para a base padrão versionada e a Central de Dados continua operando em sessão.
+- O pacote contém `app.py` e `industrial_data_layer.py` sincronizados; no deploy, substituir os arquivos do ZIP em conjunto.

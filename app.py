@@ -2785,19 +2785,23 @@ def _idl_render_step_5():
         if st.button("Aplicar dados ao Performance Engine", type="primary", use_container_width=True, key="idl_apply_engine"):
             record = None
             persist_error = None
-            try:
-                record = idl.persist_ingestion(
-                    raw=st.session_state.idl_raw,
-                    filename=st.session_state.idl_filename,
-                    company=st.session_state.idl_company,
-                    source=st.session_state.idl_source,
-                    mapping=st.session_state.idl_mapping,
-                    standard=st.session_state.idl_standard,
-                    lineage=st.session_state.idl_lineage or [],
-                    quality=quality,
-                )
-            except Exception as exc:
-                persist_error = str(exc)
+            persist_fn=getattr(idl,"persist_ingestion",None)
+            if callable(persist_fn):
+                try:
+                    record = persist_fn(
+                        raw=st.session_state.idl_raw,
+                        filename=st.session_state.idl_filename,
+                        company=st.session_state.idl_company,
+                        source=st.session_state.idl_source,
+                        mapping=st.session_state.idl_mapping,
+                        standard=st.session_state.idl_standard,
+                        lineage=st.session_state.idl_lineage or [],
+                        quality=quality,
+                    )
+                except Exception as exc:
+                    persist_error = str(exc)
+            else:
+                persist_error = "Persistência local indisponível nesta versão do Data Layer; dados mantidos na sessão."
             st.session_state.real_data = st.session_state.idl_standard
             st.session_state.data_mode = "importado"
             st.session_state.active_data_source = st.session_state.idl_filename
@@ -2853,7 +2857,7 @@ def render_data_layer_import():
 
 def _load_packaged_standard_model():
     """
-    v0.6.5 pilot bootstrap:
+    v0.6.5.1 pilot bootstrap:
     1) try to restore the last active local ingestion;
     2) otherwise load the versioned packaged workbook from the repository;
     3) hardcoded demo is only the final fallback.
@@ -2861,9 +2865,16 @@ def _load_packaged_standard_model():
     This is important because putting an .xlsx in GitHub does NOT, by itself,
     populate st.session_state.real_data.
     """
-    restored,record=idl.load_active_ingestion()
-    if restored:
-        return restored,"restaurado",record,None,None
+    # Persistence is optional in the pilot. A deploy with an older Data Layer
+    # must never crash at startup just because the persistence API is absent.
+    load_active_fn=getattr(idl,"load_active_ingestion",None)
+    if callable(load_active_fn):
+        try:
+            restored,record=load_active_fn()
+        except Exception:
+            restored,record=None,None
+        if restored:
+            return restored,"restaurado",record,None,None
 
     candidates=[
         "Industrial_Performance_Input_Padrao_v065.xlsx",
@@ -4435,7 +4446,12 @@ elif page == "Configurações":
                 rec = st.session_state.idl_last_record
                 st.json({k: rec.get(k) for k in ["company", "source", "filename", "quality_score", "quality_status", "storage_mode","version"]})
             if st.button("Limpar ingestão ativa e usar base padrão", key="config_demo"):
-                idl.clear_active_ingestion()
+                clear_active_fn=getattr(idl,"clear_active_ingestion",None)
+                if callable(clear_active_fn):
+                    try:
+                        clear_active_fn()
+                    except Exception:
+                        pass
                 st.session_state.real_data = None
                 st.session_state.data_mode = "demo"
                 st.session_state.pop("af_dataset_signature",None)
