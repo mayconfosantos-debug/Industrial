@@ -134,3 +134,41 @@ Suba/substitua na raiz do repositório:
 
 Arquivo principal do Streamlit:
 `app.py`
+
+
+## v0.6.3.1 — Simulador Atual → Meta + DRE Gerencial
+
+### Simulador
+- As 26 alavancas agora são informadas como valor **Atual → Meta**.
+- O usuário não informa mais “+X%” ou “-X% de melhoria” como lógica principal.
+- Preço médio é R$/un e Volume vendido é unidades.
+- Receita simulada = **volume simulado × preço simulado**.
+- O efeito de preço é calculado sobre o volume do cenário.
+- OTIF é mostrado como **receita protegida / receita adicional em risco** e não entra automaticamente na DRE.
+- Horas extras usam custo/hora real da MOD + premissa configurável de adicional, removendo o R$ 30/h hardcoded.
+- Frete/unidade é valor R$/un e está classificado em GGF.
+- Custo fixo e contratos/serviços passam a usar valores absolutos em R$.
+- Estoque, DPO e DSO usam dias atuais → dias meta.
+
+### DRE Gerencial
+Nova estrutura:
+Receita Bruta
+(-) Impostos e deduções
+= Receita Líquida
+(-) Insumos / MP
+(-) MOD
+(-) GGF — Frete
+(-) GGF — Energia
+(-) GGF — Manutenção
+(-) GGF — Contratos e Serviços
+(-) GGF — Outros
+= Margem Industrial
+(-) Custos Fixos Industriais
+= Resultado Industrial
+(-) Despesas Administrativas
+(-) Despesas Comerciais
+(-) Despesas Logísticas
+(-) Outros OPEX
+= EBITDA
+
+O arquivo padrão v0.6.3.1 adiciona as abas **DRE_Gerencial** e **Plano_Contas_DRE**.

@@ -22,7 +22,7 @@ except Exception:  # pragma: no cover - fallback for static/offline validation
     duckdb = None
 
 
-DATA_LAYER_VERSION = "0.6.3"
+DATA_LAYER_VERSION = "0.6.3.1"
 IGNORE_ENTITY = "Ignorar"
 AUTO_UNIT = "Auto"
 NO_CONVERSION = "Sem conversão"
@@ -44,6 +44,7 @@ ENTITY_LABELS: Dict[str, str] = {
     "manutencao": "Manutenção",
     "pessoas": "Pessoas",
     "custos": "Custos / Financeiro",
+    "dre_gerencial": "DRE Gerencial",
     "metas": "Metas",
     "padroes_produto": "Padrões de Produto",
     "parametros_diagnostico": "Parâmetros de Diagnóstico",
@@ -59,7 +60,8 @@ SHEET_ALIASES: Dict[str, List[str]] = {
     "qualidade": ["qualidade", "quality", "qc", "scrap", "refugo", "inspecao"],
     "manutencao": ["manutencao", "manutenção", "maintenance", "downtime", "paradas", "falhas"],
     "pessoas": ["pessoas", "people", "mao_de_obra", "mão de obra", "labor", "horas", "headcount"],
-    "custos": ["custos", "costs", "financeiro", "dre", "cost", "pl", "resultado"],
+    "custos": ["custos", "costs", "financeiro", "cost"],
+    "dre_gerencial": ["dre_gerencial", "dre gerencial", "management_pnl", "pnl_gerencial", "resultado_gerencial", "dre", "pl", "resultado"],
     "metas": ["metas", "targets", "goals", "objetivos"],
     "padroes_produto": ["padroes_produto", "padrões_produto", "padroes", "standards", "product_standards", "roteiro"],
     "parametros_diagnostico": ["parametros_diagnostico", "diagnostico_parametros", "diagnostic_parameters"],
@@ -118,6 +120,32 @@ FIELD_SPECS: Dict[str, Dict[str, Dict[str, Any]]] = {
         "custo_manutencao": {"label": "Custo Manutenção", "priority": "required", "dtype": "number", "unit": "R$", "aliases": ["custo_manutencao", "manutencao", "maintenance_cost", "maintenance"]},
         "custo_fixo": {"label": "Custo Fixo", "priority": "recommended", "dtype": "number", "unit": "R$", "aliases": ["custo_fixo", "fixed_cost", "custos_fixos", "factory_fixed_cost"]},
         "receita": {"label": "Receita", "priority": "required", "dtype": "number", "unit": "R$", "aliases": ["receita", "faturamento", "revenue", "sales", "net_revenue"]},
+    },
+    "dre_gerencial": {
+        "competencia": {"label": "Competência", "priority": "required", "dtype": "date", "aliases": ["competencia", "data", "date", "periodo", "period"]},
+        "planta": {"label": "Planta / Unidade", "priority": "recommended", "dtype": "text", "aliases": ["planta", "fabrica", "unidade", "site", "factory"]},
+        "receita_bruta": {"label": "Receita Bruta", "priority": "recommended", "dtype": "number", "unit": "R$", "aliases": ["receita_bruta", "gross_revenue", "faturamento_bruto"]},
+        "impostos_deducoes": {"label": "Impostos e Deduções", "priority": "recommended", "dtype": "number", "unit": "R$", "aliases": ["impostos_deducoes", "impostos", "deducoes", "taxes_deductions"]},
+        "receita_liquida": {"label": "Receita Líquida", "priority": "required", "dtype": "number", "unit": "R$", "aliases": ["receita_liquida", "receita", "net_revenue", "revenue"]},
+        "insumos_mp": {"label": "Insumos / Matéria-prima", "priority": "required", "dtype": "number", "unit": "R$", "aliases": ["insumos_mp", "custo_mp", "materia_prima", "raw_material"]},
+        "mod": {"label": "MOD", "priority": "required", "dtype": "number", "unit": "R$", "aliases": ["mod", "custo_mod", "mao_de_obra_direta", "direct_labor"]},
+        "ggf_frete": {"label": "GGF — Frete", "priority": "recommended", "dtype": "number", "unit": "R$", "aliases": ["ggf_frete", "frete", "freight", "freight_cost"]},
+        "ggf_energia": {"label": "GGF — Energia", "priority": "recommended", "dtype": "number", "unit": "R$", "aliases": ["ggf_energia", "custo_energia", "energia", "energy"]},
+        "ggf_manutencao": {"label": "GGF — Manutenção", "priority": "recommended", "dtype": "number", "unit": "R$", "aliases": ["ggf_manutencao", "custo_manutencao", "manutencao", "maintenance"]},
+        "ggf_contratos_servicos": {"label": "GGF — Contratos e Serviços", "priority": "recommended", "dtype": "number", "unit": "R$", "aliases": ["ggf_contratos_servicos", "contratos_servicos", "contracts_services"]},
+        "ggf_outros": {"label": "GGF — Outros", "priority": "recommended", "dtype": "number", "unit": "R$", "aliases": ["ggf_outros", "outros_ggf", "other_factory_overhead"]},
+        "custos_fixos_industriais": {"label": "Custos Fixos Industriais", "priority": "recommended", "dtype": "number", "unit": "R$", "aliases": ["custos_fixos_industriais", "custo_fixo_industrial", "fixed_industrial_cost"]},
+        "desp_administrativas": {"label": "Despesas Administrativas", "priority": "recommended", "dtype": "number", "unit": "R$", "aliases": ["desp_administrativas", "despesas_administrativas", "admin_expenses"]},
+        "desp_comerciais": {"label": "Despesas Comerciais", "priority": "recommended", "dtype": "number", "unit": "R$", "aliases": ["desp_comerciais", "despesas_comerciais", "selling_expenses"]},
+        "desp_logisticas": {"label": "Despesas Logísticas (sem frete)", "priority": "recommended", "dtype": "number", "unit": "R$", "aliases": ["desp_logisticas", "despesas_logisticas", "logistics_expenses"]},
+        "outros_opex": {"label": "Outros OPEX", "priority": "recommended", "dtype": "number", "unit": "R$", "aliases": ["outros_opex", "other_opex"]},
+        "volume_vendido": {"label": "Volume Vendido", "priority": "recommended", "dtype": "number", "unit": "unidades", "aliases": ["volume_vendido", "sold_volume", "qtd_vendida"]},
+        "consumo_mp_kg": {"label": "Consumo MP", "priority": "optional", "dtype": "number", "unit": "kg", "aliases": ["consumo_mp_kg", "material_consumption_kg"]},
+        "preco_medio_mp_kg": {"label": "Preço Médio MP", "priority": "optional", "dtype": "number", "unit": "R$", "aliases": ["preco_medio_mp_kg", "preco_mp_kg", "material_price_kg"]},
+        "consumo_energia_kwh": {"label": "Consumo de Energia", "priority": "optional", "dtype": "number", "unit": "kWh", "aliases": ["consumo_energia_kwh", "energy_consumption_kwh"]},
+        "estoque_dias": {"label": "Estoque (dias)", "priority": "optional", "dtype": "number", "unit": "dias", "aliases": ["estoque_dias", "inventory_days"]},
+        "prazo_fornecedor_dias": {"label": "Prazo Fornecedor (dias)", "priority": "optional", "dtype": "number", "unit": "dias", "aliases": ["prazo_fornecedor_dias", "dpo", "supplier_days"]},
+        "prazo_cliente_dias": {"label": "Prazo Cliente (dias)", "priority": "optional", "dtype": "number", "unit": "dias", "aliases": ["prazo_cliente_dias", "dso", "customer_days"]},
     },
     "metas": {
         "indicador": {"label": "Indicador", "priority": "required", "dtype": "text", "aliases": ["indicador", "kpi", "metric"]},

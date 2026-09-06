@@ -842,6 +842,7 @@ def calculate_real(data):
     m=data["manutencao"].copy()
     pe=data["pessoas"].copy()
     c=data["custos"].copy()
+    dg=data.get("dre_gerencial",pd.DataFrame()).copy()
     std=data.get("padroes_produto",pd.DataFrame()).copy()
 
     for col in ["planejado","realizado","horas_disponiveis","horas_paradas","velocidade_real","velocidade_nominal"]:
@@ -854,8 +855,22 @@ def calculate_real(data):
     for col in ["horas_normais","horas_extras"]:
         pe[col]=nseries(pe[col])
     for col in ["custo_mp","custo_mod","custo_energia","custo_manutencao","receita"]:
+        if col not in c.columns:
+            c[col]=0
         c[col]=nseries(c[col])
-    c["custo_fixo"]=nseries(c["custo_fixo"]) if "custo_fixo" in c.columns else 0
+    for col in ["custo_frete","ggf_outros","custo_fixo"]:
+        c[col]=nseries(c[col]) if col in c.columns else 0
+
+    if dg is not None and not dg.empty:
+        for col in [
+            "receita_bruta","impostos_deducoes","receita_liquida","insumos_mp","mod",
+            "ggf_frete","ggf_energia","ggf_manutencao","ggf_contratos_servicos","ggf_outros",
+            "custos_fixos_industriais","desp_administrativas","desp_comerciais",
+            "desp_logisticas","outros_opex","volume_vendido","consumo_mp_kg",
+            "preco_medio_mp_kg","consumo_energia_kwh","estoque_dias",
+            "prazo_fornecedor_dias","prazo_cliente_dias"
+        ]:
+            dg[col]=nseries(dg[col]) if col in dg.columns else 0
 
     # ---------------- Basic operation ----------------
     planned=p["planejado"].sum()
@@ -871,15 +886,96 @@ def calculate_real(data):
     scrap=safe_div(q["refugo"].sum(),q["produzido"].sum())
     rework_rate=safe_div(q["retrabalho"].sum(),q["produzido"].sum()) if "retrabalho" in q.columns else np.nan
 
-    # ---------------- Finance ----------------
-    var_cost=c[["custo_mp","custo_mod","custo_energia","custo_manutencao"]].sum().sum()
-    fixed_cost=c["custo_fixo"].sum()
-    revenue=c["receita"].sum()
-    total_cost=var_cost+fixed_cost
-    contrib=revenue-var_cost
-    ebitda=revenue-total_cost
-    margin_contrib=safe_div(contrib,revenue)
+    # ---------------- Finance / DRE Gerencial ----------------
+    if dg is not None and not dg.empty:
+        revenue_gross=float(dg["receita_bruta"].sum())
+        deductions=float(dg["impostos_deducoes"].sum())
+        revenue=float(dg["receita_liquida"].sum())
+        if revenue == 0 and revenue_gross != 0:
+            revenue=revenue_gross-deductions
+        if revenue_gross == 0:
+            revenue_gross=revenue+deductions
+
+        cost_mp=float(dg["insumos_mp"].sum())
+        cost_mod=float(dg["mod"].sum())
+        cost_freight=float(dg["ggf_frete"].sum())
+        cost_energy=float(dg["ggf_energia"].sum())
+        cost_maintenance=float(dg["ggf_manutencao"].sum())
+        cost_contracts=float(dg["ggf_contratos_servicos"].sum())
+        cost_ggf_other=float(dg["ggf_outros"].sum())
+        fixed_industrial=float(dg["custos_fixos_industriais"].sum())
+        exp_admin=float(dg["desp_administrativas"].sum())
+        exp_commercial=float(dg["desp_comerciais"].sum())
+        exp_logistics=float(dg["desp_logisticas"].sum())
+        other_opex=float(dg["outros_opex"].sum())
+
+        sold_volume=float(dg["volume_vendido"].sum()) if float(dg["volume_vendido"].sum())>0 else float(actual)
+        material_consumption_kg=float(dg["consumo_mp_kg"].sum())
+        mp_price_series=dg["preco_medio_mp_kg"].replace(0,np.nan)
+        weighted_mp_price=float(mp_price_series.mean()) if mp_price_series.notna().any() else np.nan
+        energy_consumption_kwh=float(dg["consumo_energia_kwh"].sum())
+        inv_series=dg["estoque_dias"].replace(0,np.nan)
+        dpo_series=dg["prazo_fornecedor_dias"].replace(0,np.nan)
+        dso_series=dg["prazo_cliente_dias"].replace(0,np.nan)
+        inventory_days=float(inv_series.mean()) if inv_series.notna().any() else np.nan
+        dpo_days=float(dpo_series.mean()) if dpo_series.notna().any() else np.nan
+        dso_days=float(dso_series.mean()) if dso_series.notna().any() else np.nan
+    else:
+        revenue=float(c["receita"].sum())
+        revenue_gross=revenue
+        deductions=0.0
+        cost_mp=float(c["custo_mp"].sum())
+        cost_mod=float(c["custo_mod"].sum())
+        cost_freight=float(c["custo_frete"].sum()) if "custo_frete" in c.columns else 0.0
+        cost_energy=float(c["custo_energia"].sum())
+        cost_maintenance=float(c["custo_manutencao"].sum())
+        cost_contracts=0.0
+        cost_ggf_other=float(c["ggf_outros"].sum()) if "ggf_outros" in c.columns else 0.0
+        fixed_industrial=float(c["custo_fixo"].sum())
+        exp_admin=0.0
+        exp_commercial=0.0
+        exp_logistics=0.0
+        other_opex=0.0
+        sold_volume=float(actual)
+        material_consumption_kg=np.nan
+        weighted_mp_price=np.nan
+        energy_consumption_kwh=np.nan
+        inventory_days=np.nan
+        dpo_days=np.nan
+        dso_days=np.nan
+
+    ggf_total=cost_freight+cost_energy+cost_maintenance+cost_contracts+cost_ggf_other
+    industrial_cost=cost_mp+cost_mod+ggf_total
+    industrial_margin_value=revenue-industrial_cost
+    industrial_margin=safe_div(industrial_margin_value,revenue)
+    expenses_total=exp_admin+exp_commercial+exp_logistics+other_opex
+    result_industrial=industrial_margin_value-fixed_industrial
+    ebitda=result_industrial-expenses_total
+    total_cost=industrial_cost+fixed_industrial+expenses_total
+
+    contrib=industrial_margin_value
+    margin_contrib=industrial_margin
+    var_cost=industrial_cost
+    fixed_cost=fixed_industrial+expenses_total
     cost_unit=safe_div(total_cost,actual)
+
+    dre=pd.DataFrame({
+        "Linha":[
+            "Receita Bruta","(-) Impostos e deduções","Receita Líquida",
+            "(-) Insumos / Matéria-prima","(-) MOD",
+            "(-) GGF — Frete","(-) GGF — Energia","(-) GGF — Manutenção",
+            "(-) GGF — Contratos e Serviços","(-) GGF — Outros",
+            "Margem Industrial","(-) Custos Fixos Industriais","Resultado Industrial",
+            "(-) Despesas Administrativas","(-) Despesas Comerciais",
+            "(-) Despesas Logísticas","(-) Outros OPEX","EBITDA"
+        ],
+        "Realizado":[
+            revenue_gross,-deductions,revenue,
+            -cost_mp,-cost_mod,-cost_freight,-cost_energy,-cost_maintenance,
+            -cost_contracts,-cost_ggf_other,industrial_margin_value,-fixed_industrial,result_industrial,
+            -exp_admin,-exp_commercial,-exp_logistics,-other_opex,ebitda
+        ]
+    })
 
     overtime=pe["horas_extras"].sum()
     actual_hh=pe["horas_normais"].sum()+overtime
@@ -927,7 +1023,7 @@ def calculate_real(data):
     t_otif=target_from(data,["OTIF"],np.nan)
     t_cost=target_from(data,["Custo/unidade","Custo por unidade"],np.nan)
     t_overtime=target_from(data,["Horas extras"],np.nan)
-    t_margin=target_from(data,["Margem","Margem Contribuição"],0.31)
+    t_margin=target_from(data,["Margem","Margem Industrial","Margem Contribuição"],0.31)
     t_ebitda=target_from(data,["EBITDA Industrial","EBITDA"],np.nan)
 
     # ---------------- Trends / line view ----------------
@@ -964,6 +1060,12 @@ def calculate_real(data):
         if setup_mask.any():
             setup_avg_min=float(m.loc[setup_mask,"duracao_horas"].mean()*60)
 
+    if "tipo_parada" in m.columns:
+        planned_mask=m["tipo_parada"].astype(str).map(norm).str.contains("setup|planejada|preventiva|planned",regex=True)
+        unplanned_downtime_h=float(m.loc[~planned_mask,"duracao_horas"].sum())
+    else:
+        unplanned_downtime_h=float(m["duracao_horas"].sum())
+
     causes=m.groupby("causa",as_index=False)["duracao_horas"].sum().rename(columns={"causa":"Causa","duracao_horas":"Horas"})
     if not causes.empty:
         margin_unit=safe_div(contrib,actual)
@@ -975,9 +1077,12 @@ def calculate_real(data):
     margin_unit=safe_div(contrib,max(1,actual))
     loss_prod=max(0,planned-actual)*margin_unit
     loss_scrap=q["refugo"].sum()*safe_div(total_cost,max(1,actual))
-    overtime_premium=max(0,overtime-(t_overtime if pd.notna(t_overtime) else 0))*30 if pd.notna(t_overtime) else overtime*30
+    labor_hour_rate=safe_div(cost_mod,max(actual_hh,1))
+    overtime_premium_factor=sim_assumption("adicional_hora_extra",0.50)
+    overtime_excess=max(0,overtime-(t_overtime if pd.notna(t_overtime) else 0)) if pd.notna(t_overtime) else overtime
+    overtime_premium=overtime_excess*labor_hour_rate*overtime_premium_factor
     cost_gap=max(0,cost_unit-t_cost)*actual if pd.notna(t_cost) else max(0,total_cost*0.015)
-    energy_gap=max(0,c["custo_energia"].sum()*0.05)
+    energy_gap=max(0,cost_energy*0.05)
     impacts=pd.DataFrame({
         "Impacto":["Gap de volume","Refugo","Eficiência MOD","Horas extras","Custo / consumo"],
         "R$":[loss_prod,loss_scrap,labor_gap_cost,overtime_premium,cost_gap]
@@ -998,13 +1103,13 @@ def calculate_real(data):
         ("OTIF","—",fmt_pct(t_otif) if pd.notna(t_otif) else "Meta ausente",np.nan,"sem dado","!"),
         ("Custo/unidade",fmt_money(cost_unit,2),fmt_money(t_cost,2) if pd.notna(t_cost) else "Meta ausente",(1-safe_div(cost_unit,t_cost)) if pd.notna(t_cost) else np.nan,(f"{safe_div(cost_unit,t_cost)-1:+.1%}".replace(".",",") if pd.notna(t_cost) else "sem meta"),"↑" if pd.notna(t_cost) and cost_unit>t_cost else "→"),
         ("Horas extras",f"{overtime:,.0f} h".replace(",","."),f"{t_overtime:,.0f} h".replace(",",".") if pd.notna(t_overtime) else "Meta ausente",(1-safe_div(overtime,t_overtime)) if pd.notna(t_overtime) else np.nan,(f"{safe_div(overtime,t_overtime)-1:+.1%}".replace(".",",") if pd.notna(t_overtime) else "sem meta"),"↑" if pd.notna(t_overtime) and overtime>t_overtime else "→"),
-        ("Margem contribuição",fmt_pct(margin_contrib),fmt_pct(t_margin),safe_div(margin_contrib,t_margin)-1,f"{(margin_contrib-t_margin)*100:+.1f} pp".replace(".",","),"↓" if margin_contrib<t_margin else "↑"),
+        ("Margem Industrial",fmt_pct(margin_contrib),fmt_pct(t_margin),safe_div(margin_contrib,t_margin)-1,f"{(margin_contrib-t_margin)*100:+.1f} pp".replace(".",","),"↓" if margin_contrib<t_margin else "↑"),
     ]
 
     margin_score=safe_div(margin_contrib,t_margin)-1
     cards=[
         ("Receita Líquida",fmt_money(revenue),attainment-1,f"{attainment-1:+.1%} vs. plano".replace(".",",")),
-        ("Margem Contrib.",fmt_pct(margin_contrib),margin_score,f"{(margin_contrib-t_margin)*100:+.1f} pp vs. meta".replace(".",",")),
+        ("Margem Industrial",fmt_pct(margin_contrib),margin_score,f"{(margin_contrib-t_margin)*100:+.1f} pp vs. meta".replace(".",",")),
         ("EBITDA Industrial",fmt_money(ebitda),(safe_div(ebitda,t_ebitda)-1) if pd.notna(t_ebitda) else margin_score,(f"{safe_div(ebitda,t_ebitda)-1:+.1%} vs. meta".replace(".",",") if pd.notna(t_ebitda) else "meta financeira")),
         ("Produção",f"{actual:,.0f} un".replace(",","."),attainment-1,f"{attainment-1:+.1%} vs. meta".replace(".",",")),
         ("OEE",fmt_pct(oee),safe_div(oee,t_oee)-1,f"{(oee-t_oee)*100:+.1f} pp vs. meta".replace(".",",")),
@@ -1020,7 +1125,7 @@ def calculate_real(data):
         "OTIF":revenue*0.01,
         "Custo/unidade":cost_gap,
         "Horas extras":overtime_premium,
-        "Margem contribuição":max(0,(t_margin-margin_contrib)*revenue)
+        "Margem Industrial":max(0,(t_margin-margin_contrib)*revenue)
     }
     max_rel=max([v for v in financial_relevance.values() if pd.notna(v)] + [1])
     health_rows=[]
@@ -1034,7 +1139,7 @@ def calculate_real(data):
     health_df=pd.DataFrame(health_rows,columns=["KPI","Score","Peso","Relevancia_R$","Tem_Meta","Tem_Dado"])
     health_score=float(np.average(health_df["Score"],weights=health_df["Peso"]))
 
-    financial_names=["Produção","Refugo","Custo/unidade","Horas extras","Margem contribuição","Eficiência MOD"]
+    financial_names=["Produção","Refugo","Custo/unidade","Horas extras","Margem Industrial","Eficiência MOD"]
     hfin=health_df[health_df["KPI"].isin(financial_names)]
     financial_health=float(np.average(hfin["Score"],weights=hfin["Peso"])) if not hfin.empty else health_score
     operational_names=["Produção","OEE","Eficiência MOD","Refugo","OTIF"]
@@ -1090,7 +1195,7 @@ def calculate_real(data):
 
     top2=diagnostic.head(2)["Alavanca"].tolist()
     conclusion=(
-        f"A operação fechou em {attainment:.1%} do plano, com OEE de {oee:.1%} e margem de contribuição de {margin_contrib:.1%}. "
+        f"A operação fechou em {attainment:.1%} do plano, com OEE de {oee:.1%} e margem industrial de {margin_contrib:.1%}. "
         f"A saúde consolidada está em {health_score:.0f}/100 e a saúde financeira em {financial_health:.0f}/100. "
     )
     if worst_line is not None:
@@ -1100,23 +1205,36 @@ def calculate_real(data):
     if top2:
         conclusion += "As alavancas a priorizar são " + " e ".join(top2) + "."
 
-    dre=pd.DataFrame({
-        "Linha":["Receita Líquida","(-) Custos Variáveis","Margem de Contribuição","(-) Custos Fixos","EBITDA Industrial"],
-        "Realizado":[revenue,-var_cost,contrib,-fixed_cost,ebitda]
-    })
-
     return {
         "cards":cards,"kpis":kpis,"trend":trend,"line_perf":line_perf,"causes":causes,
         "impacts":impacts,"dre":dre,"cost_structure":{"Variável":var_cost,"Fixo":fixed_cost},
+        "cost_structure_detail":{
+            "Insumos / MP":cost_mp,"MOD":cost_mod,"GGF — Frete":cost_freight,
+            "GGF — Energia":cost_energy,"GGF — Manutenção":cost_maintenance,
+            "GGF — Contratos":cost_contracts,"GGF — Outros":cost_ggf_other,
+            "Custos Fixos Industriais":fixed_industrial,
+            "Despesas":expenses_total
+        },
         "oee":oee,"target_oee":t_oee,"scrap":scrap,"target_scrap":t_scrap,
         "attainment":attainment,"margin":margin_contrib,"target_margin":t_margin,
-        "ebitda":ebitda,"revenue":revenue,"actual":actual,"planned":planned,
+        "ebitda":ebitda,"revenue":revenue,"revenue_gross":revenue_gross,"deductions":deductions,
+        "actual":actual,"planned":planned,"sold_volume":sold_volume,
         "availability":availability,"performance":performance,"quality":quality,
         "cost_unit":cost_unit,"overtime":overtime,"productivity":productivity_raw,
         "rework_rate":rework_rate,"mttr_min":mttr_min,"setup_avg_min":setup_avg_min,
+        "unplanned_downtime_h":unplanned_downtime_h,
         "avg_headcount":avg_headcount,
-        "cost_mp":float(c["custo_mp"].sum()),"cost_mod":float(c["custo_mod"].sum()),
-        "cost_energy":float(c["custo_energia"].sum()),"cost_maintenance":float(c["custo_manutencao"].sum()),
+        "cost_mp":cost_mp,"cost_mod":cost_mod,"cost_freight":cost_freight,
+        "cost_energy":cost_energy,"cost_maintenance":cost_maintenance,
+        "cost_contracts":cost_contracts,"cost_ggf_other":cost_ggf_other,
+        "fixed_industrial":fixed_industrial,
+        "exp_admin":exp_admin,"exp_commercial":exp_commercial,"exp_logistics":exp_logistics,
+        "other_opex":other_opex,"expenses_total":expenses_total,
+        "material_consumption_kg":material_consumption_kg,
+        "mp_price_per_kg":weighted_mp_price if pd.notna(weighted_mp_price) and weighted_mp_price>0 else np.nan,
+        "energy_consumption_kwh":energy_consumption_kwh,
+        "energy_kwh_per_unit":safe_div(energy_consumption_kwh,sold_volume) if energy_consumption_kwh>0 else np.nan,
+        "inventory_days":inventory_days,"dpo_days":dpo_days,"dso_days":dso_days,
         "labor_efficiency":labor_eff,"std_hours_earned":std_hours_earned,"actual_hh":actual_hh,
         "standards_missing":standards_missing,
         "health_score":health_score,"financial_health":financial_health,"operational_health":operational_health,
@@ -1144,7 +1262,7 @@ def demo_dataset():
     })
     cards=[
         ("Receita Líquida","R$ 12,4 mi",-0.068,"-6,8% vs. meta"),
-        ("Margem Contrib.","27,8%",-0.103,"-3,2 pp vs. meta"),
+        ("Margem Industrial","27,8%",-0.103,"-3,2 pp vs. meta"),
         ("EBITDA Industrial","R$ 1,9 mi",-0.208,"-20,8% vs. meta"),
         ("Produção","41.250 un",-0.083,"-8,3% vs. meta"),
         ("OEE","71,4%",-0.0846,"-6,6 pp vs. meta"),
@@ -1158,15 +1276,27 @@ def demo_dataset():
         ("OTIF","89%","95%",-0.063,"-6 pp","↓"),
         ("Custo/unidade","R$ 18,42","R$ 17,10",-0.077,"+7,7%","↑"),
         ("Horas extras","1.280 h","900 h",-0.422,"+42%","↑"),
-        ("Margem contribuição","27,8%","31%",-0.103,"-3,2 pp","↓"),
+        ("Margem Industrial","27,8%","31%",-0.103,"-3,2 pp","↓"),
     ]
     impacts=pd.DataFrame({
         "Impacto":["Gap de volume","Refugo","Eficiência MOD","Horas extras","Custo / consumo"],
         "R$":[220000,110000,84000,75000,48000]
     })
     dre=pd.DataFrame({
-        "Linha":["Receita Líquida","(-) Custos Variáveis","Margem de Contribuição","(-) Custos Fixos","EBITDA Industrial"],
-        "Realizado":[12400000,-8950000,3450000,-1550000,1900000]
+        "Linha":[
+            "Receita Bruta","(-) Impostos e deduções","Receita Líquida",
+            "(-) Insumos / Matéria-prima","(-) MOD",
+            "(-) GGF — Frete","(-) GGF — Energia","(-) GGF — Manutenção",
+            "(-) GGF — Contratos e Serviços","(-) GGF — Outros",
+            "Margem Industrial","(-) Custos Fixos Industriais","Resultado Industrial",
+            "(-) Despesas Administrativas","(-) Despesas Comerciais",
+            "(-) Despesas Logísticas","(-) Outros OPEX","EBITDA"
+        ],
+        "Realizado":[
+            13200000,-800000,12400000,
+            -5191000,-1611000,-553000,-895000,-500000,-120000,-80000,
+            3450000,-950000,2500000,-250000,-180000,-100000,-70000,1900000
+        ]
     })
     health_details=pd.DataFrame([
         ["Produção",72,3.0,220000,True,True],
@@ -1176,7 +1306,7 @@ def demo_dataset():
         ["OTIF",70,1.2,50000,True,True],
         ["Custo/unidade",68,1.6,95000,True,True],
         ["Horas extras",0,1.5,75000,True,True],
-        ["Margem contribuição",50,2.2,397000,True,True],
+        ["Margem Industrial",50,2.2,397000,True,True],
     ],columns=["KPI","Score","Peso","Relevancia_R$","Tem_Meta","Tem_Dado"])
     diagnostic=pd.DataFrame([
         ["Setup",96000,2,30,"Engenharia de Processos",31,15.5,"Prioridade 2","Aplicar SMED e preparação externa."],
@@ -1190,19 +1320,35 @@ def demo_dataset():
     return {
         "cards":cards,"kpis":kpis,"trend":trend,"line_perf":line_perf,"causes":causes,"impacts":impacts,
         "dre":dre,"cost_structure":{"Variável":8950000,"Fixo":1550000},
+        "cost_structure_detail":{
+            "Insumos / MP":5191000.0,"MOD":1611000.0,"GGF — Frete":553000.0,
+            "GGF — Energia":895000.0,"GGF — Manutenção":500000.0,
+            "GGF — Contratos":120000.0,"GGF — Outros":80000.0,
+            "Custos Fixos Industriais":950000.0,"Despesas":600000.0
+        },
         "oee":.714,"target_oee":.78,"scrap":.038,"target_scrap":.025,
         "attainment":.917,"margin":.278,"target_margin":.31,
-        "ebitda":1900000,"revenue":12400000,"actual":41250,"planned":45000,
+        "ebitda":1900000,"revenue":12400000,"revenue_gross":13200000,"deductions":800000,
+        "actual":41250,"planned":45000,"sold_volume":41250,
         "availability":.748,"performance":.945,"quality":.981,
         "cost_unit":18.42,"overtime":1280,"productivity":18.2,
-        "rework_rate":.042,"mttr_min":95.0,"setup_avg_min":48.0,"avg_headcount":118,
-        "cost_mp":5191000.0,"cost_mod":1611000.0,"cost_energy":895000.0,"cost_maintenance":1253000.0,
+        "rework_rate":.042,"mttr_min":95.0,"setup_avg_min":48.0,"unplanned_downtime_h":112.0,
+        "avg_headcount":118,
+        "cost_mp":5191000.0,"cost_mod":1611000.0,"cost_freight":553000.0,
+        "cost_energy":895000.0,"cost_maintenance":500000.0,
+        "cost_contracts":120000.0,"cost_ggf_other":80000.0,
+        "fixed_industrial":950000.0,
+        "exp_admin":250000.0,"exp_commercial":180000.0,"exp_logistics":100000.0,
+        "other_opex":70000.0,"expenses_total":600000.0,
+        "material_consumption_kg":61800.0,"mp_price_per_kg":84.0,
+        "energy_consumption_kwh":23512.5,"energy_kwh_per_unit":0.57,
+        "inventory_days":45.0,"dpo_days":30.0,"dso_days":35.0,
         "labor_efficiency":.898,"std_hours_earned":12120,"actual_hh":13497,
         "standards_missing":[],
         "health_score":55,"financial_health":49,"operational_health":61,
         "health_details":health_details,
         "diagnostic":diagnostic,
-        "diagnostic_conclusion":"A fábrica fechou em 91,7% do plano, com OEE de 71,4% e margem de contribuição de 27,8%. A saúde consolidada está em 55/100 e a saúde financeira em 49/100. A Linha 3 é a mais crítica (OEE 64%). A principal causa de parada é Falha mecânica (58 h). As alavancas a priorizar são Disponibilidade e Refugo."
+        "diagnostic_conclusion":"A fábrica fechou em 91,7% do plano, com OEE de 71,4% e margem industrial de 27,8%. A saúde consolidada está em 55/100 e a saúde financeira em 49/100. A Linha 3 é a mais crítica (OEE 64%). A principal causa de parada é Falha mecânica (58 h). As alavancas a priorizar são Disponibilidade e Refugo."
     }
 
 
@@ -1391,6 +1537,373 @@ def sim_assumption(key, default):
         return default
     val=pd.to_numeric(hit.iloc[0]["valor"],errors="coerce")
     return float(val) if pd.notna(val) else default
+
+
+def simulator_baselines(D):
+    """Baselines reais usados pelo simulador. Sempre trabalha em Atual -> Meta."""
+    base_volume=max(1.0,float(D.get("sold_volume",D.get("actual",1)) or 1))
+    base_price=safe_div(float(D.get("revenue",0)),base_volume)
+
+    material_kg=float(D.get("material_consumption_kg",np.nan))
+    if pd.notna(material_kg) and material_kg>0:
+        mp_specific=material_kg/base_volume
+        mp_specific_unit="kg/un"
+    else:
+        mp_specific=sim_assumption("consumo_mp_indice_base",1.04)
+        mp_specific_unit="índice"
+
+    mp_price=float(D.get("mp_price_per_kg",np.nan))
+    if pd.notna(mp_price) and mp_price>0:
+        mp_price_unit="R$/kg"
+    else:
+        mp_price=1.0
+        mp_price_unit="índice"
+
+    energy_intensity=float(D.get("energy_kwh_per_unit",np.nan))
+    if pd.notna(energy_intensity) and energy_intensity>0:
+        energy_unit="kWh/un"
+    else:
+        energy_intensity=1.0
+        energy_unit="índice"
+
+    freight_unit=safe_div(float(D.get("cost_freight",0)),base_volume)
+    setup=float(D.get("setup_avg_min",np.nan))
+    if pd.isna(setup):
+        setup=sim_assumption("setup_medio_base",48.0)
+    mttr=float(D.get("mttr_min",np.nan))
+    if pd.isna(mttr):
+        mttr=sim_assumption("mttr_base",95.0)
+    rework=float(D.get("rework_rate",np.nan))*100
+    if pd.isna(rework):
+        rework=sim_assumption("retrabalho_base",4.2)
+
+    inv=float(D.get("inventory_days",np.nan))
+    dpo=float(D.get("dpo_days",np.nan))
+    dso=float(D.get("dso_days",np.nan))
+
+    return {
+        "oee":float(D.get("oee",0))*100,
+        "availability":float(D.get("availability",0))*100,
+        "performance":float(D.get("performance",0))*100,
+        "capacity":sim_assumption("capacidade_utilizada_base",72.0),
+        "scrap":float(D.get("scrap",0))*100,
+        "rework":rework,
+        "setup":setup,
+        "unplanned_hours":float(D.get("unplanned_downtime_h",0) or 0),
+        "mttr":mttr,
+        "overtime_hours":float(D.get("overtime",0) or 0),
+        "productivity":max(0.01,float(D.get("productivity",18.2) or 18.2)),
+        "headcount":float(D.get("avg_headcount",118) if pd.notna(D.get("avg_headcount",np.nan)) else 118),
+        "mp_specific":max(0.0001,float(mp_specific)),
+        "mp_specific_unit":mp_specific_unit,
+        "mp_price":max(0.0001,float(mp_price)),
+        "mp_price_unit":mp_price_unit,
+        "material_loss_pct":sim_assumption("perdas_material_base_pct",4.0),
+        "energy_intensity":max(0.0001,float(energy_intensity)),
+        "energy_unit":energy_unit,
+        "freight_per_unit":max(0.0,float(freight_unit)),
+        "otif":sim_assumption("otif_base",89.0),
+        "price_per_unit":max(0.01,float(base_price)),
+        "mix_pp":0.0,
+        "volume_units":base_volume,
+        "fixed_industrial":max(0.0,float(D.get("fixed_industrial",D.get("cost_structure",{}).get("Fixo",0)))),
+        "contracts_services":max(0.0,float(D.get("cost_contracts",0))),
+        "inventory_days":inv if pd.notna(inv) and inv>0 else sim_assumption("estoque_dias_base",45.0),
+        "dpo_days":dpo if pd.notna(dpo) and dpo>0 else sim_assumption("prazo_fornecedor_base",30.0),
+        "dso_days":dso if pd.notna(dso) and dso>0 else sim_assumption("prazo_cliente_base",35.0),
+    }
+
+
+def calculate_simulator_scenario(D, targets, prod_mode="OEE direto"):
+    """
+    Motor determinístico do simulador.
+    A entrada é sempre valor atual -> valor meta.
+    Preço e volume são encadeados: Receita = volume simulado x preço simulado.
+    OTIF é receita protegida e não entra automaticamente na DRE.
+    """
+    B=simulator_baselines(D)
+
+    base_revenue=float(D.get("revenue",0))
+    base_ebitda=float(D.get("ebitda",0))
+    base_volume=max(1.0,B["volume_units"])
+    base_price=B["price_per_unit"]
+
+    base_mp=float(D.get("cost_mp",0))
+    base_mod=float(D.get("cost_mod",0))
+    base_freight=float(D.get("cost_freight",0))
+    base_energy=float(D.get("cost_energy",0))
+    base_maintenance=float(D.get("cost_maintenance",0))
+    base_contracts=float(D.get("cost_contracts",0))
+    base_ggf_other=float(D.get("cost_ggf_other",0))
+    base_fixed=float(D.get("fixed_industrial",0))
+    exp_admin=float(D.get("exp_admin",0))
+    exp_commercial=float(D.get("exp_commercial",0))
+    exp_logistics=float(D.get("exp_logistics",0))
+    other_opex=float(D.get("other_opex",0))
+    expenses_total=exp_admin+exp_commercial+exp_logistics+other_opex
+
+    # ---------- Capacidade / produção: habilita volume, não soma EBITDA em duplicidade ----------
+    base_oee=max(0.0001,float(D.get("oee",0.0001)))
+    base_avail=max(0.0001,float(D.get("availability",0.0001)))
+    base_perf=max(0.0001,float(D.get("performance",0.0001)))
+    base_quality=max(0.0001,float(D.get("quality",1.0)))
+
+    setup_improvement=(B["setup"]-targets["setup"])/max(B["setup"],1e-9)
+    unplanned_improvement=(B["unplanned_hours"]-targets["unplanned_hours"])/max(B["unplanned_hours"],1e-9) if B["unplanned_hours"]>0 else 0
+    mttr_improvement=(B["mttr"]-targets["mttr"])/max(B["mttr"],1e-9)
+    downtime_share=max(0.0,1-base_avail)
+    process_recovery=downtime_share*(0.25*setup_improvement+0.45*unplanned_improvement+0.30*mttr_improvement)
+    derived_availability=float(np.clip(base_avail+process_recovery,0.01,0.99))
+
+    if prod_mode=="OEE direto":
+        effective_oee=float(np.clip(targets["oee"]/100,0.01,0.99))
+        effective_availability=base_avail
+        effective_performance=base_perf
+    else:
+        manual_availability=float(np.clip(targets["availability"]/100,0.01,0.99))
+        effective_availability=max(manual_availability,derived_availability)
+        effective_performance=float(np.clip(targets["performance"]/100,0.01,1.05))
+        effective_oee=float(np.clip(effective_availability*min(effective_performance,1.0)*base_quality,0.01,0.99))
+
+    capacity_ratio=max(0.01,targets["capacity"]/max(B["capacity"],0.01))
+    performance_capacity_ratio=max(0.01,effective_oee/base_oee)*capacity_ratio
+    potential_units=max(0.0,base_volume*performance_capacity_ratio)
+
+    requested_volume=max(0.0,float(targets["volume_units"]))
+    realized_volume=min(requested_volume,potential_units) if requested_volume>base_volume else requested_volume
+    realized_volume=max(0.0,realized_volume)
+    volume_factor=safe_div(realized_volume,base_volume)
+
+    # ---------- Receita: preço x volume, sem soma independente sobre a mesma base ----------
+    target_price=max(0.0,float(targets["price_per_unit"]))
+    volume_revenue_effect=base_price*(realized_volume-base_volume)
+    price_revenue_effect=realized_volume*(target_price-base_price)
+    simulated_revenue=base_revenue+volume_revenue_effect+price_revenue_effect
+
+    # Mix altera contribuição / EBITDA, não a receita nominal.
+    mix_ebitda=simulated_revenue*(float(targets["mix_pp"])/100)
+
+    # ---------- MP / insumos: efeitos encadeados ----------
+    mp_after_volume=base_mp*volume_factor
+    base_scrap=float(B["scrap"])/100
+    target_scrap=float(targets["scrap"])/100
+    scrap_factor=(1-base_scrap)/max(1-target_scrap,0.001)
+    mp_after_scrap=mp_after_volume*scrap_factor
+
+    specific_ratio=float(targets["mp_specific"])/max(B["mp_specific"],1e-9)
+    mp_after_specific=mp_after_scrap*specific_ratio
+
+    price_mp_ratio=float(targets["mp_price"])/max(B["mp_price"],1e-9)
+    mp_after_price=mp_after_specific*price_mp_ratio
+
+    loss_factor=(1+float(targets["material_loss_pct"])/100)/max(1+B["material_loss_pct"]/100,1e-9)
+    scenario_mp=max(0.0,mp_after_price*loss_factor)
+
+    scrap_saving=mp_after_volume-mp_after_scrap
+    mp_specific_saving=mp_after_scrap-mp_after_specific
+    mp_price_saving=mp_after_specific-mp_after_price
+    material_loss_saving=mp_after_price-scenario_mp
+
+    # ---------- MOD + retrabalho + produtividade + hora extra ----------
+    mod_after_volume=base_mod*volume_factor
+    rework_factor=(1+float(targets["rework"])/100)/max(1+B["rework"]/100,1e-9)
+    mod_after_rework=mod_after_volume*rework_factor
+    productivity_factor=B["productivity"]/max(float(targets["productivity"]),0.01)
+    mod_after_productivity=mod_after_rework*productivity_factor
+
+    actual_hh=max(1.0,float(D.get("actual_hh",1)))
+    labor_rate=safe_div(base_mod,actual_hh)
+    overtime_premium_factor=sim_assumption("adicional_hora_extra",0.50)
+    overtime_saving=(B["overtime_hours"]-float(targets["overtime_hours"]))*labor_rate*overtime_premium_factor
+    scenario_mod=max(0.0,mod_after_productivity-overtime_saving)
+
+    rework_mod_saving=mod_after_volume-mod_after_rework
+    productivity_saving=mod_after_rework-mod_after_productivity
+
+    # ---------- Energia: volume + retrabalho + intensidade ----------
+    energy_after_volume=base_energy*volume_factor
+    energy_after_rework=energy_after_volume*rework_factor
+    energy_intensity_ratio=float(targets["energy_intensity"])/max(B["energy_intensity"],1e-9)
+    scenario_energy=max(0.0,energy_after_rework*energy_intensity_ratio)
+    rework_energy_saving=energy_after_volume-energy_after_rework
+    energy_saving=energy_after_rework-scenario_energy
+    rework_saving=rework_mod_saving+rework_energy_saving
+
+    # ---------- Frete dentro de GGF ----------
+    freight_after_volume=base_freight*volume_factor
+    scenario_freight=max(0.0,float(targets["freight_per_unit"])*realized_volume)
+    freight_saving=freight_after_volume-scenario_freight
+
+    # ---------- GGF / Estrutura ----------
+    scenario_contracts=max(0.0,float(targets["contracts_services"]))
+    contracts_saving=base_contracts-scenario_contracts
+
+    headcount_value=(B["headcount"]-float(targets["headcount"]))*sim_assumption("custo_medio_mensal_pessoa",8500.0)
+    explicit_fixed_change=abs(float(targets["fixed_industrial"])-B["fixed_industrial"])>1.0
+    if explicit_fixed_change:
+        scenario_fixed=max(0.0,float(targets["fixed_industrial"]))
+        fixed_saving=base_fixed-scenario_fixed
+        headcount_ebitda=0.0
+    else:
+        scenario_fixed=max(0.0,base_fixed-headcount_value)
+        fixed_saving=0.0
+        headcount_ebitda=base_fixed-scenario_fixed
+
+    # ---------- DRE simulada ----------
+    scenario_industrial_cost=(
+        scenario_mp+scenario_mod+scenario_freight+scenario_energy+
+        base_maintenance+scenario_contracts+base_ggf_other
+    )
+    simulated_industrial_margin_value=simulated_revenue+mix_ebitda-scenario_industrial_cost
+    simulated_margin=safe_div(simulated_industrial_margin_value,simulated_revenue)
+    simulated_result_industrial=simulated_industrial_margin_value-scenario_fixed
+    simulated_ebitda=simulated_result_industrial-expenses_total
+    ebitda_gain=simulated_ebitda-base_ebitda
+    revenue_gain=simulated_revenue-base_revenue
+
+    # O efeito volume no EBITDA inclui a variação de custos necessária para produzir/vender o volume.
+    volume_cost_effect=-(
+        (mp_after_volume-base_mp)+(mod_after_volume-base_mod)+
+        (energy_after_volume-base_energy)+(freight_after_volume-base_freight)
+    )
+    volume_ebitda=volume_revenue_effect+volume_cost_effect
+    price_ebitda=price_revenue_effect
+
+    # ---------- OTIF: valor protegido, não DRE automática ----------
+    otif_delta=float(targets["otif"])-B["otif"]
+    if otif_delta>=0:
+        denominator=max(1.0,100-B["otif"])
+    else:
+        denominator=max(1.0,B["otif"])
+    otif_protected_value=base_revenue*sim_assumption("receita_em_risco_otif",0.12)*(otif_delta/denominator)
+
+    # ---------- Capital de giro fora do EBITDA ----------
+    period_days=max(1.0,sim_assumption("dias_periodo",30.0))
+    inventory_release=(float(D.get("cost_structure",{}).get("Variável",scenario_industrial_cost))/period_days)*(B["inventory_days"]-float(targets["inventory_days"]))
+    supplier_release=(base_mp/period_days)*(float(targets["dpo_days"])-B["dpo_days"])
+    customer_release=(simulated_revenue/period_days)*(B["dso_days"]-float(targets["dso_days"]))
+    working_capital_release=inventory_release+supplier_release+customer_release
+
+    # ---------- Capacidade habilitada ----------
+    incremental_capacity_units=max(0.0,potential_units-base_volume)
+    unit_industrial_margin=safe_div(base_revenue-float(D.get("cost_structure",{}).get("Variável",0)),base_volume)
+    capacity_value=max(0.0,incremental_capacity_units*max(unit_industrial_margin,0))
+
+    # ---------- Bridge reconciliado ----------
+    bridge={
+        "Volume vendido":volume_ebitda,
+        "Preço médio":price_ebitda,
+        "Mix":mix_ebitda,
+        "Refugo":scrap_saving,
+        "Retrabalho":rework_saving,
+        "Produtividade":productivity_saving,
+        "Horas extras":overtime_saving,
+        "Consumo específico MP":mp_specific_saving,
+        "Preço de MP":mp_price_saving,
+        "Perdas de material":material_loss_saving,
+        "kWh/unidade":energy_saving,
+        "Frete/unidade":freight_saving,
+        "Contratos/serviços":contracts_saving,
+        "Custo fixo":fixed_saving,
+        "Headcount":headcount_ebitda,
+    }
+    bridge={k:float(v) for k,v in bridge.items() if abs(float(v))>0.5}
+
+    # ---------- Value map: 26 alavancas ----------
+    enable_weights={}
+    if prod_mode=="OEE direto":
+        enable_weights["OEE"]=abs(float(targets["oee"])-B["oee"])/max(B["oee"],1)
+    else:
+        enable_weights["Disponibilidade"]=abs(float(targets["availability"])-B["availability"])/max(B["availability"],1)
+        enable_weights["Performance"]=abs(float(targets["performance"])-B["performance"])/max(B["performance"],1)
+    enable_weights["Capacidade utilizada"]=abs(float(targets["capacity"])-B["capacity"])/max(B["capacity"],1)
+    enable_weights["Setup médio"]=abs(float(targets["setup"])-B["setup"])/max(B["setup"],1)
+    enable_weights["Paradas não planejadas"]=abs(float(targets["unplanned_hours"])-B["unplanned_hours"])/max(B["unplanned_hours"],1) if B["unplanned_hours"] else 0
+    enable_weights["MTTR"]=abs(float(targets["mttr"])-B["mttr"])/max(B["mttr"],1)
+    total_weight=sum(enable_weights.values()) or 1.0
+
+    breakdown=[]
+    for lever,w in enable_weights.items():
+        if w>1e-9:
+            breakdown.append([lever,capacity_value*w/total_weight,"Valor habilitado","Alta" if lever!="Capacidade utilizada" else "Média"])
+
+    additive_map=[
+        ("Refugo",scrap_saving,"EBITDA","Alta"),
+        ("Retrabalho",rework_saving,"EBITDA","Alta"),
+        ("Horas extras",overtime_saving,"EBITDA","Alta"),
+        ("Produtividade",productivity_saving,"EBITDA","Alta"),
+        ("Headcount",headcount_ebitda if not explicit_fixed_change else headcount_value,"EBITDA" if not explicit_fixed_change else "Driver de estrutura","Alta"),
+        ("Consumo específico MP",mp_specific_saving,"EBITDA","Alta"),
+        ("Preço de MP",mp_price_saving,"EBITDA","Alta"),
+        ("Perdas de material",material_loss_saving,"EBITDA","Alta"),
+        ("kWh/unidade",energy_saving,"EBITDA","Média"),
+        ("Frete/unidade",freight_saving,"EBITDA / GGF","Alta"),
+        ("OTIF",otif_protected_value,"Receita protegida","Média"),
+        ("Preço médio",price_ebitda,"EBITDA","Alta"),
+        ("Mix de produtos",mix_ebitda,"EBITDA","Média"),
+        ("Volume vendido",volume_ebitda,"EBITDA","Alta"),
+        ("Custo fixo",fixed_saving,"EBITDA","Alta"),
+        ("Contratos/serviços",contracts_saving,"EBITDA / GGF","Alta"),
+        ("Estoque",(float(D.get("cost_structure",{}).get("Variável",0))/period_days)*(B["inventory_days"]-float(targets["inventory_days"])),"Caixa","Alta"),
+        ("Prazo fornecedor",supplier_release,"Caixa","Alta"),
+        ("Prazo cliente",customer_release,"Caixa","Alta"),
+    ]
+    breakdown.extend(additive_map)
+    breakdown_df=pd.DataFrame(breakdown,columns=["Alavanca","Impacto_R$","Tipo","Confiança"])
+    if not breakdown_df.empty:
+        breakdown_df["AbsImpact"]=breakdown_df["Impacto_R$"].abs()
+        breakdown_df=breakdown_df.sort_values("AbsImpact",ascending=False).drop(columns=["AbsImpact"])
+
+    simulated_dre=pd.DataFrame({
+        "Linha":[
+            "Receita Líquida","(-) Insumos / Matéria-prima","(-) MOD",
+            "(-) GGF — Frete","(-) GGF — Energia","(-) GGF — Manutenção",
+            "(-) GGF — Contratos e Serviços","(-) GGF — Outros",
+            "Margem Industrial","(-) Custos Fixos Industriais","Resultado Industrial",
+            "(-) Despesas Administrativas","(-) Despesas Comerciais",
+            "(-) Despesas Logísticas","(-) Outros OPEX","EBITDA"
+        ],
+        "Base":[
+            base_revenue,-base_mp,-base_mod,-base_freight,-base_energy,-base_maintenance,
+            -base_contracts,-base_ggf_other,
+            base_revenue-(base_mp+base_mod+base_freight+base_energy+base_maintenance+base_contracts+base_ggf_other),
+            -base_fixed,
+            base_revenue-(base_mp+base_mod+base_freight+base_energy+base_maintenance+base_contracts+base_ggf_other)-base_fixed,
+            -exp_admin,-exp_commercial,-exp_logistics,-other_opex,base_ebitda
+        ],
+        "Simulado":[
+            simulated_revenue,-scenario_mp,-scenario_mod,-scenario_freight,-scenario_energy,-base_maintenance,
+            -scenario_contracts,-base_ggf_other,simulated_industrial_margin_value,
+            -scenario_fixed,simulated_result_industrial,
+            -exp_admin,-exp_commercial,-exp_logistics,-other_opex,simulated_ebitda
+        ]
+    })
+
+    return {
+        "baseline":B,
+        "realized_volume":realized_volume,
+        "requested_volume":requested_volume,
+        "potential_units":potential_units,
+        "output_potential_growth":safe_div(potential_units,base_volume)-1,
+        "effective_oee":effective_oee,
+        "effective_availability":effective_availability,
+        "effective_performance":effective_performance,
+        "simulated_revenue":simulated_revenue,
+        "revenue_gain":revenue_gain,
+        "simulated_ebitda":simulated_ebitda,
+        "ebitda_gain":ebitda_gain,
+        "simulated_margin":simulated_margin,
+        "working_capital_release":working_capital_release,
+        "otif_protected_value":otif_protected_value,
+        "capacity_value":capacity_value,
+        "scenario_fixed":scenario_fixed,
+        "scenario_freight":scenario_freight,
+        "bridge":bridge,
+        "breakdown":breakdown_df,
+        "simulated_dre":simulated_dre,
+        "explicit_fixed_change":explicit_fixed_change,
+    }
+
 
 def owner_email(owner_name):
     data=st.session_state.get("real_data")
@@ -2110,7 +2623,7 @@ if page == "Cockpit Executivo":
                 f"<div style='width:{vp:.1f}%;background:{BLUE}'></div>"
                 f"<div style='width:{fp:.1f}%;background:#BBD8EC'></div></div>"
                 f"<div style='display:flex;justify-content:space-between;margin-top:6px;font-size:.60rem'>"
-                f"<span>Variável <b>{vp:.0f}%</b></span><span>Fixo <b>{fp:.0f}%</b></span></div>",
+                f"<span>Custo industrial <b>{vp:.0f}%</b></span><span>Estrutura + despesas <b>{fp:.0f}%</b></span></div>",
                 unsafe_allow_html=True
             )
 
@@ -2370,7 +2883,7 @@ elif page == "Diagnóstico e Causas":
                               showlegend=False)
             st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
             with st.expander("Racional do impacto financeiro"):
-                st.caption("Volume perdido é valorizado pela margem de contribuição unitária; refugo considera custo consumido nas unidades perdidas; eficiência MOD considera HH reais acima das HH padrão ganhas; horas extras consideram custo incremental; custo/consumo compara real versus referência. Causa e efeito não são somados duas vezes.")
+                st.caption("Volume perdido é valorizado pela margem industrial unitária; refugo considera custo consumido nas unidades perdidas; eficiência MOD considera HH reais acima das HH padrão ganhas; horas extras consideram custo incremental; custo/consumo compara real versus referência. Causa e efeito não são somados duas vezes.")
 
     st.write("")
     with st.container(border=True):
@@ -2417,628 +2930,419 @@ elif page == "Diagnóstico e Causas":
 
 
 elif page == "Finanças / DRE":
-    page_header("Finanças / DRE","A operação traduzida em margem, custo fixo, variável e EBITDA.")
+    page_header("Finanças / DRE","DRE gerencial industrial: receita, insumos, MOD, GGF, estrutura, despesas e EBITDA.")
 
-    c1,c2,c3,c4 = st.columns(4, gap="small")
+    ggf_total=float(D.get("cost_freight",0))+float(D.get("cost_energy",0))+float(D.get("cost_maintenance",0))+float(D.get("cost_contracts",0))+float(D.get("cost_ggf_other",0))
+    c1,c2,c3,c4,c5 = st.columns(5, gap="small")
     c1.metric("Receita Líquida", fmt_money(D["revenue"]))
-    c2.metric("Margem Contrib.", fmt_pct(D["margin"]))
-    c3.metric("EBITDA Industrial", fmt_money(D["ebitda"]))
-    c4.metric("Custo Fixo", fmt_money(D["cost_structure"]["Fixo"]))
+    c2.metric("Margem Industrial", fmt_pct(D["margin"]))
+    c3.metric("EBITDA", fmt_money(D["ebitda"]))
+    c4.metric("GGF", fmt_money(ggf_total))
+    c5.metric("Despesas", fmt_money(D.get("expenses_total",0)))
 
     st.write("")
-    c1, c2 = st.columns([1.15,.85], gap="small")
+    c1, c2 = st.columns([1.22,.78], gap="small")
     with c1:
-        with st.container(border=True, height=340):
-            panel_title("DRE Gerencial","Visão resumida do resultado")
+        with st.container(border=True):
+            panel_title("DRE Gerencial","Frete classificado em GGF; despesas segregadas do custo industrial.")
             view = D["dre"].copy()
             view["Realizado"] = view["Realizado"].map(lambda x: fmt_money(x))
-            st.dataframe(view, use_container_width=True, hide_index=True)
+            st.dataframe(
+                view, use_container_width=True, hide_index=True, height=585,
+                column_config={
+                    "Linha":st.column_config.TextColumn("DRE Gerencial",width="large"),
+                    "Realizado":st.column_config.TextColumn("Realizado",width="medium"),
+                }
+            )
     with c2:
-        with st.container(border=True, height=340):
-            panel_title("Custo Fixo x Variável","Estrutura econômica da operação")
-            vals = D["cost_structure"]
-            fig = go.Figure(go.Pie(labels=list(vals.keys()), values=list(vals.values()), hole=.72,
-                                   marker=dict(colors=[BLUE,"#BBD8EC"]), textinfo="percent",
-                                   textfont=dict(size=11)))
-            fig.update_layout(height=260, margin=dict(l=0,r=0,t=0,b=0),
-                              legend=dict(orientation="h",y=-.05),
-                              paper_bgcolor="rgba(0,0,0,0)")
+        with st.container(border=True):
+            panel_title("Composição do Custo","Insumos, mão de obra, GGF, estrutura e despesas")
+            vals={
+                "Insumos / MP":float(D.get("cost_mp",0)),
+                "MOD":float(D.get("cost_mod",0)),
+                "GGF":ggf_total,
+                "Custos Fixos Industriais":float(D.get("fixed_industrial",0)),
+                "Despesas":float(D.get("expenses_total",0)),
+            }
+            vals={k:v for k,v in vals.items() if v>0}
+            fig = go.Figure(go.Pie(
+                labels=list(vals.keys()), values=list(vals.values()), hole=.68,
+                textinfo="percent", textfont=dict(size=10)
+            ))
+            fig.update_layout(
+                height=325, margin=dict(l=0,r=0,t=0,b=15),
+                legend=dict(orientation="h",y=-.08,font=dict(size=9)),
+                paper_bgcolor="rgba(0,0,0,0)"
+            )
             st.plotly_chart(fig, use_container_width=True, config={"displayModeBar":False})
 
+            st.markdown(
+                f"<div class='lever-shell'>"
+                f"<div class='lever-kicker'>GGF — GASTOS GERAIS DE FABRICAÇÃO</div>"
+                f"<div class='lever-title'>Frete {fmt_money(D.get('cost_freight',0))}</div>"
+                f"<div class='lever-meta'>Energia {fmt_money(D.get('cost_energy',0))} · "
+                f"Manutenção {fmt_money(D.get('cost_maintenance',0))} · "
+                f"Contratos {fmt_money(D.get('cost_contracts',0))} · "
+                f"Outros {fmt_money(D.get('cost_ggf_other',0))}</div></div>",
+                unsafe_allow_html=True
+            )
+            st.write("")
+            st.markdown(
+                "<div class='frontend-note'><b>Regra gerencial:</b> o frete está em GGF. "
+                "Despesas administrativas, comerciais e logísticas ficam separadas. "
+                "A camada de dados mantém a classificação para que uma conta possa ser reclassificada sem alterar o motor.</div>",
+                unsafe_allow_html=True
+            )
+
+    st.write("")
+    c1,c2,c3,c4=st.columns(4,gap="small")
+    c1.metric("GGF — Frete",fmt_money(D.get("cost_freight",0)))
+    c2.metric("Custos Fixos Industriais",fmt_money(D.get("fixed_industrial",0)))
+    c3.metric("Desp. Administrativas",fmt_money(D.get("exp_admin",0)))
+    c4.metric("Desp. Comerciais + Logísticas",fmt_money(D.get("exp_commercial",0)+D.get("exp_logistics",0)))
+
+
 elif page == "Alavancas de Valor":
-    page_header("Alavancas de Valor","Simule as 26 alavancas acordadas e traduza performance em receita, margem, EBITDA e caixa.")
+    page_header("Alavancas de Valor","Simule as 26 alavancas por valor atual → valor meta e veja o efeito na DRE gerencial.")
 
-    # ------------------------------------------------------------------
-    # Baselines / configurable assumptions
-    # ------------------------------------------------------------------
-    base_revenue=float(D["revenue"])
-    base_margin=float(D["margin"])
-    base_ebitda=float(D["ebitda"])
-    base_fixed=float(D["cost_structure"]["Fixo"])
-    base_var=float(D["cost_structure"]["Variável"])
-    base_mp=float(D.get("cost_mp",base_var*sim_assumption("participacao_mp_custo_variavel",0.58)))
-    base_energy=float(D.get("cost_energy",base_var*sim_assumption("participacao_energia_custo_variavel",0.10)))
-    base_mod=float(D.get("cost_mod",base_var*0.18))
+    B=simulator_baselines(D)
 
-    capacity_base=sim_assumption("capacidade_utilizada_base",72.0)
-    setup_base=float(D.get("setup_avg_min",np.nan))
-    if pd.isna(setup_base):
-        setup_base=sim_assumption("setup_medio_base",48.0)
-    mttr_base=float(D.get("mttr_min",np.nan))
-    if pd.isna(mttr_base):
-        mttr_base=sim_assumption("mttr_base",95.0)
-    rework_base=float(D.get("rework_rate",np.nan))*100
-    if pd.isna(rework_base):
-        rework_base=sim_assumption("retrabalho_base",4.2)
-    otif_base=sim_assumption("otif_base",89.0)
-    mp_specific_base=sim_assumption("consumo_mp_indice_base",1.04)
-    avg_monthly_person_cost=sim_assumption("custo_medio_mensal_pessoa",8500.0)
-    mp_share=sim_assumption("participacao_mp_custo_variavel",0.58)
-    freight_share=sim_assumption("participacao_frete_custo_variavel",0.07)
-    contracts_share=sim_assumption("participacao_contratos_custo_fixo",0.22)
-    otif_risk_share=sim_assumption("receita_em_risco_otif",0.12)
-    period_days=max(1.0,sim_assumption("dias_periodo",30.0))
-
-    base_productivity=float(D.get("productivity",18.2))
-    base_headcount=float(D.get("avg_headcount",np.nan))
-    if pd.isna(base_headcount):
-        base_headcount=118.0
-
-    # ------------------------------------------------------------------
-    # Scope defaults — exactly the agreed simulator scope
-    # ------------------------------------------------------------------
-    scope_targets={
-        "sim_oee":78.0,
-        "sim_availability":82.0,
-        "sim_performance":97.0,
-        "sim_capacity":80.0,
-        "sim_scrap":2.5,
-        "sim_rework":2.0,
-        "sim_setup":35.0,
-        "sim_unplanned":20,
-        "sim_mttr":70.0,
-        "sim_overtime":25,
-        "sim_productivity":20.0,
-        "sim_headcount":0,
-        "sim_mp_specific":1.00,
-        "sim_mp_price":3.0,
-        "sim_material_loss":15,
-        "sim_energy":8.0,
-        "sim_freight":5.0,
-        "sim_otif":95.0,
-        "sim_price":2.0,
-        "sim_mix":1.0,
-        "sim_volume":5.0,
-        "sim_fixed":5.0,
-        "sim_contracts":10.0,
-        "sim_inventory":10,
-        "sim_dpo":5,
-        "sim_dso":5,
+    target_defaults={
+        "oee":78.0,
+        "availability":82.0,
+        "performance":97.0,
+        "capacity":80.0,
+        "scrap":2.5,
+        "rework":2.0,
+        "setup":35.0,
+        "unplanned_hours":max(0.0,B["unplanned_hours"]*0.80),
+        "mttr":70.0,
+        "overtime_hours":max(0.0,B["overtime_hours"]*0.75),
+        "productivity":20.0 if B["productivity"]<20 else B["productivity"]*1.05,
+        "headcount":B["headcount"],
+        "mp_specific":1.0 if B["mp_specific_unit"]=="índice" else B["mp_specific"]*0.96,
+        "mp_price":0.97 if B["mp_price_unit"]=="índice" else B["mp_price"]*0.97,
+        "material_loss_pct":max(0.0,B["material_loss_pct"]*0.85),
+        "energy_intensity":B["energy_intensity"]*0.92,
+        "freight_per_unit":B["freight_per_unit"]*0.95,
+        "otif":95.0,
+        "price_per_unit":B["price_per_unit"]*1.02,
+        "mix_pp":1.0,
+        "volume_units":B["volume_units"]*1.05,
+        "fixed_industrial":B["fixed_industrial"]*0.95,
+        "contracts_services":B["contracts_services"]*0.90,
+        "inventory_days":max(0.0,B["inventory_days"]-10),
+        "dpo_days":B["dpo_days"]+5,
+        "dso_days":max(0.0,B["dso_days"]-5),
     }
-    base_targets={
-        "sim_oee":float(np.clip(D["oee"]*100,40.0,95.0)),
-        "sim_availability":float(np.clip(D["availability"]*100,50.0,99.0)),
-        "sim_performance":float(np.clip(D["performance"]*100,60.0,105.0)),
-        "sim_capacity":float(np.clip(capacity_base,40.0,100.0)),
-        "sim_scrap":float(np.clip(D["scrap"]*100,0.0,10.0)),
-        "sim_rework":float(np.clip(rework_base,0.0,10.0)),
-        "sim_setup":float(np.clip(setup_base,5.0,max(120.0,setup_base*1.25))),
-        "sim_unplanned":0,
-        "sim_mttr":float(np.clip(mttr_base,10.0,max(180.0,mttr_base*1.25))),
-        "sim_overtime":0,
-        "sim_productivity":float(np.clip(base_productivity,5.0,35.0)),
-        "sim_headcount":0,
-        "sim_mp_specific":float(np.clip(mp_specific_base,0.80,1.20)),
-        "sim_mp_price":0.0,
-        "sim_material_loss":0,
-        "sim_energy":0.0,
-        "sim_freight":0.0,
-        "sim_otif":float(np.clip(otif_base,50.0,100.0)),
-        "sim_price":0.0,
-        "sim_mix":0.0,
-        "sim_volume":0.0,
-        "sim_fixed":0.0,
-        "sim_contracts":0.0,
-        "sim_inventory":0,
-        "sim_dpo":0,
-        "sim_dso":0,
-    }
-    for k,v in scope_targets.items():
-        if k not in st.session_state:
-            st.session_state[k]=v
+
+    lever_names=[
+        "oee","availability","performance","capacity","scrap","rework","setup","unplanned_hours","mttr",
+        "overtime_hours","productivity","headcount","mp_specific","mp_price","material_loss_pct",
+        "energy_intensity","freight_per_unit","otif","price_per_unit","mix_pp","volume_units",
+        "fixed_industrial","contracts_services","inventory_days","dpo_days","dso_days"
+    ]
+    for name in lever_names:
+        key=f"simt_{name}"
+        if key not in st.session_state:
+            st.session_state[key]=float(target_defaults[name])
+
     if "sim_prod_mode" not in st.session_state:
         st.session_state.sim_prod_mode="OEE direto"
     if "sim_group" not in st.session_state:
         st.session_state.sim_group="Produção"
 
-    # Header / controls
     with st.container(border=True):
-        c1,c2,c3=st.columns([1,.33,.33],gap="small")
+        c1,c2,c3=st.columns([1,.34,.34],gap="small")
         with c1:
             st.markdown(
                 "<div class='sim-header'><div>"
-                "<div class='sim-header-title'>Simulador de Performance & Valor</div>"
-                "<div class='sim-header-sub'>Escopo oficial: 10 grupos · 26 alavancas · cálculo com dependências para evitar dupla contagem.</div>"
-                "</div><div><span class='sim-scope-chip'>MODELO v0.6.2</span></div></div>",
+                "<div class='sim-header-title'>Simulador Atual → Meta</div>"
+                "<div class='sim-header-sub'>O usuário informa onde quer chegar; o motor calcula variação, dependências e impacto financeiro.</div>"
+                "</div><div><span class='sim-scope-chip'>26 ALAVANCAS · DRE GERENCIAL</span></div></div>",
                 unsafe_allow_html=True
             )
         with c2:
             if st.button("Cenário exemplo",use_container_width=True):
-                for k,v in scope_targets.items():
-                    st.session_state[k]=v
+                for name in lever_names:
+                    st.session_state[f"simt_{name}"]=float(target_defaults[name])
                 st.rerun()
         with c3:
-            if st.button("Resetar para base",use_container_width=True):
-                for k,v in base_targets.items():
-                    st.session_state[k]=v
+            if st.button("Resetar para atual",use_container_width=True):
+                for name in lever_names:
+                    st.session_state[f"simt_{name}"]=float(B[name])
                 st.rerun()
 
-    # ------------------------------------------------------------------
-    # Input panel
-    # ------------------------------------------------------------------
-    left,right=st.columns([1.32,.68],gap="small")
+    def target_input(label,name,current,unit="",step=0.1,min_value=0.0,max_value=None,fmt="%.2f",help_text=None):
+        kwargs={"label":label,"key":f"simt_{name}","step":float(step),"format":fmt}
+        if min_value is not None:
+            kwargs["min_value"]=float(min_value)
+        if max_value is not None:
+            kwargs["max_value"]=float(max_value)
+        if help_text:
+            kwargs["help"]=help_text
+        st.number_input(**kwargs)
+        target=float(st.session_state[f"simt_{name}"])
+        delta=target-current
+        if unit=="%":
+            d=f"{delta:+.1f} pp"
+            current_txt=f"{current:.1f}%"
+            target_txt=f"{target:.1f}%"
+        elif unit=="R$":
+            d=fmt_money(delta,2)
+            current_txt=fmt_money(current,2)
+            target_txt=fmt_money(target,2)
+        elif unit=="R$/un":
+            d=f"R$ {delta:+,.2f}".replace(",",".")
+            current_txt=f"R$ {current:,.2f}".replace(",",".")
+            target_txt=f"R$ {target:,.2f}".replace(",",".")
+        else:
+            d=f"{delta:+,.2f}".replace(",",".")
+            current_txt=f"{current:,.2f}".replace(",",".")
+            target_txt=f"{target:,.2f}".replace(",",".")
+            if unit:
+                current_txt+=f" {unit}"
+                target_txt+=f" {unit}"
+                d+=f" {unit}"
+        st.caption(f"Atual {current_txt} → Meta {target_txt} · Δ {d}")
+        return target
 
+    left,right=st.columns([1.32,.68],gap="small")
     with left:
-        with st.container(border=True, height=585):
+        with st.container(border=True):
             top1,top2=st.columns([.58,.42],gap="small")
             groups=["Produção","Qualidade","Processo","Pessoas","Materiais","Energia","Logística","Financeiro","Estrutura","Capital"]
             with top1:
                 group=st.selectbox("Grupo de alavancas",groups,key="sim_group")
             with top2:
                 prod_mode=st.radio(
-                    "Motor de Produção",
-                    ["OEE direto","Drivers de OEE"],
-                    horizontal=True,
-                    key="sim_prod_mode",
-                    help="OEE direto usa o alvo de OEE como capacidade potencial. Drivers de OEE recalcula o OEE a partir de disponibilidade e performance. Os dois caminhos não são somados."
+                    "Motor de Produção",["OEE direto","Drivers de OEE"],
+                    horizontal=True,key="sim_prod_mode",
+                    help="OEE direto usa a meta de OEE. Drivers recalcula OEE com disponibilidade e performance. Os caminhos não são somados."
                 )
-
             st.markdown("---")
 
             if group=="Produção":
-                st.markdown("<div class='lever-kicker'>PRODUÇÃO</div><div class='lever-title'>Capacidade, eficiência e volume potencial</div>",unsafe_allow_html=True)
+                st.markdown("<div class='lever-kicker'>PRODUÇÃO</div><div class='lever-title'>Capacidade e eficiência — sempre Atual → Meta</div>",unsafe_allow_html=True)
                 a,b=st.columns(2,gap="medium")
                 with a:
-                    st.slider("OEE (%)",40.0,95.0,key="sim_oee",step=.5,disabled=(prod_mode!="OEE direto"),
-                              help="Impacto: volume, receita potencial, margem e EBITDA. No modo Drivers de OEE o resultado é calculado por disponibilidade × performance × qualidade base.")
-                    st.caption("Impacto: volume / receita / margem / EBITDA · Confiança: Alta")
-                    st.slider("Performance (%)",60.0,105.0,key="sim_performance",step=.5,disabled=(prod_mode=="OEE direto"),
-                              help="Driver do OEE. Não é somado novamente ao OEE direto.")
-                    st.caption("Impacto: produção adicional · Confiança: Alta")
+                    target_input("Meta simulada — OEE","oee",B["oee"],"%",.5,20,100,"%.1f")
+                    target_input("Meta simulada — Disponibilidade","availability",B["availability"],"%",.5,20,100,"%.1f")
                 with b:
-                    st.slider("Disponibilidade (%)",50.0,99.0,key="sim_availability",step=.5,disabled=(prod_mode=="OEE direto"),
-                              help="Driver do OEE. Processo (setup, paradas e MTTR) pode elevar a disponibilidade técnica estimada.")
-                    st.caption("Impacto: capacidade recuperada · Confiança: Alta")
-                    st.slider("Capacidade utilizada (%)",40.0,100.0,key="sim_capacity",step=.5,
-                              help="Aumentar utilização reduz custo fixo por unidade, mas não reduz automaticamente o custo fixo total. A monetização depende de volume vendido.")
-                    st.caption("Impacto: volume / absorção de custo fixo · Confiança: Média")
+                    target_input("Meta simulada — Performance","performance",B["performance"],"%",.5,20,105,"%.1f")
+                    target_input("Meta simulada — Capacidade utilizada","capacity",B["capacity"],"%",.5,1,100,"%.1f")
+                st.markdown("<div class='frontend-note'>No modo OEE direto, a meta de OEE define a capacidade potencial. No modo Drivers, disponibilidade e performance formam o OEE. Capacidade habilitada só vira EBITDA quando o volume é vendido.</div>",unsafe_allow_html=True)
 
             elif group=="Qualidade":
-                st.markdown("<div class='lever-kicker'>QUALIDADE</div><div class='lever-title'>Yield, desperdício e capacidade consumida</div>",unsafe_allow_html=True)
+                st.markdown("<div class='lever-kicker'>QUALIDADE</div><div class='lever-title'>Yield, desperdício e retrabalho</div>",unsafe_allow_html=True)
                 a,b=st.columns(2,gap="medium")
                 with a:
-                    st.slider("Refugo (%)",0.0,10.0,key="sim_scrap",step=.1,
-                              help="Economia de matéria-prima/custo consumido nas unidades perdidas. Não duplica a margem do volume recuperado.")
-                    st.caption("Impacto: MP / margem / EBITDA · Confiança: Alta")
+                    target_input("Meta simulada — Refugo","scrap",B["scrap"],"%",.1,0,30,"%.1f")
                 with b:
-                    st.slider("Retrabalho (%)",0.0,10.0,key="sim_rework",step=.1,
-                              help="Reduz MOD, energia e capacidade consumida por retrabalho.")
-                    st.caption("Impacto: MOD / energia / capacidade · Confiança: Alta")
+                    target_input("Meta simulada — Retrabalho","rework",B["rework"],"%",.1,0,30,"%.1f")
+                st.markdown("<div class='frontend-note'>Refugo atua no consumo de insumos; retrabalho atua em MOD e energia. Os efeitos são encadeados para reduzir dupla contagem.</div>",unsafe_allow_html=True)
 
             elif group=="Processo":
-                st.markdown("<div class='lever-kicker'>PROCESSO</div><div class='lever-title'>Tempo disponível, confiabilidade e recuperação de capacidade</div>",unsafe_allow_html=True)
+                st.markdown("<div class='lever-kicker'>PROCESSO</div><div class='lever-title'>Tempo disponível e confiabilidade</div>",unsafe_allow_html=True)
                 a,b=st.columns(2,gap="medium")
                 with a:
-                    st.slider("Setup médio (min)",5.0,max(120.0,setup_base*1.25),key="sim_setup",step=1.0)
-                    st.caption("Impacto: horas disponíveis + volume · Confiança: Alta")
-                    st.slider("MTTR (min)",10.0,max(180.0,mttr_base*1.25),key="sim_mttr",step=1.0)
-                    st.caption("Impacto: tempo recuperado / disponibilidade · Confiança: Alta")
+                    target_input("Meta simulada — Setup médio","setup",B["setup"],"min",1,0,max(240,B["setup"]*2),"%.0f")
+                    target_input("Meta simulada — MTTR","mttr",B["mttr"],"min",1,0,max(300,B["mttr"]*2),"%.0f")
                 with b:
-                    st.slider("Redução de paradas não planejadas (%)",0,60,key="sim_unplanned",step=1)
-                    st.caption("Impacto: disponibilidade + produção · Confiança: Alta")
-                    st.markdown(
-                        "<div class='frontend-note'>Setup, paradas e MTTR alimentam a disponibilidade técnica. "
-                        "Quando Disponibilidade já foi elevada manualmente, o motor usa o maior efeito — não soma duas vezes.</div>",
-                        unsafe_allow_html=True
-                    )
+                    target_input("Meta simulada — Paradas não planejadas","unplanned_hours",B["unplanned_hours"],"h",1,0,max(1,B["unplanned_hours"]*2),"%.0f")
+                    st.markdown("<div class='frontend-note'>Setup, paradas e MTTR são drivers de disponibilidade. Eles habilitam capacidade e não são somados novamente como EBITDA se o volume já monetiza essa capacidade.</div>",unsafe_allow_html=True)
 
             elif group=="Pessoas":
-                st.markdown("<div class='lever-kicker'>PESSOAS</div><div class='lever-title'>Mão de obra, produtividade e dimensionamento</div>",unsafe_allow_html=True)
+                st.markdown("<div class='lever-kicker'>PESSOAS</div><div class='lever-title'>Horas, produtividade e dimensionamento</div>",unsafe_allow_html=True)
                 a,b=st.columns(2,gap="medium")
                 with a:
-                    st.slider("Redução de horas extras (%)",0,70,key="sim_overtime",step=1)
-                    st.caption("Impacto: MOD + EBITDA · Confiança: Alta")
-                    st.slider("Produtividade (un/h equivalente)",5.0,35.0,key="sim_productivity",step=.1,
-                              help="Antes de impactar o consolidado, o ganho é linearizado pelo mix usando HH padrão por produto.")
-                    st.caption("Impacto: capacidade / MOD · mix linearizado · Confiança: Alta")
+                    target_input("Meta simulada — Horas extras","overtime_hours",B["overtime_hours"],"h",10,0,max(100,B["overtime_hours"]*2),"%.0f")
+                    target_input("Meta simulada — Produtividade","productivity",B["productivity"],"un/h eq.",.1,.1,max(50,B["productivity"]*2),"%.1f",
+                                 "No consolidado multiproduto o ganho deve ser linearizado por HH padrão.")
                 with b:
-                    st.slider("Variação de headcount (pessoas)",-30,30,key="sim_headcount",step=1)
-                    st.caption(f"Impacto: custo de pessoal · premissa R$ {avg_monthly_person_cost:,.0f}/pessoa".replace(",","."))
-                    st.markdown(
-                        "<div class='frontend-note'>Headcount positivo aumenta custo; negativo gera economia. "
-                        "O modelo não recomenda corte automaticamente — apenas simula o efeito econômico.</div>",
-                        unsafe_allow_html=True
-                    )
+                    target_input("Meta simulada — Headcount","headcount",B["headcount"],"pessoas",1,0,max(10,B["headcount"]*2),"%.0f")
+                    st.markdown("<div class='frontend-note'>Hora extra usa o custo/hora real da MOD e somente o adicional configurado. Headcount é tratado como driver da estrutura; se Custo Fixo também for alterado, o motor evita somar os dois.</div>",unsafe_allow_html=True)
 
             elif group=="Materiais":
-                st.markdown("<div class='lever-kicker'>MATERIAIS</div><div class='lever-title'>Consumo, preço e perdas de matéria-prima</div>",unsafe_allow_html=True)
+                st.markdown("<div class='lever-kicker'>MATERIAIS</div><div class='lever-title'>Consumo, preço e perdas de insumos</div>",unsafe_allow_html=True)
                 a,b=st.columns(2,gap="medium")
                 with a:
-                    st.slider("Consumo específico MP (índice)",0.80,1.20,key="sim_mp_specific",step=.01,
-                              help="1,00 representa o padrão. Valores acima de 1,00 indicam sobreconsumo.")
-                    st.caption("Impacto: custo variável · Confiança: Alta")
-                    st.slider("Redução de perdas de material (%)",0,50,key="sim_material_loss",step=1)
-                    st.caption("Impacto: custo variável · Confiança: Alta")
+                    target_input(f"Meta simulada — Consumo específico MP ({B['mp_specific_unit']})","mp_specific",B["mp_specific"],B["mp_specific_unit"],.01,0,max(B["mp_specific"]*2,2),"%.3f")
+                    target_input("Meta simulada — Perdas de material","material_loss_pct",B["material_loss_pct"],"%",.1,0,30,"%.1f")
                 with b:
-                    st.slider("Redução do preço de MP (%)",0.0,15.0,key="sim_mp_price",step=.5)
-                    st.caption("Impacto: CMV / margem · Confiança: Alta")
+                    target_input(f"Meta simulada — Preço de MP ({B['mp_price_unit']})","mp_price",B["mp_price"],B["mp_price_unit"],.01,0,max(B["mp_price"]*2,2),"%.3f")
+                    st.markdown("<div class='frontend-note'>Quando a base trouxer kg e R$/kg, o simulador usa valores físicos. Se não houver, trabalha com índice 1,00 até o DE/PARA receber os dados reais.</div>",unsafe_allow_html=True)
 
             elif group=="Energia":
-                st.markdown("<div class='lever-kicker'>ENERGIA</div><div class='lever-title'>Consumo específico e custo de transformação</div>",unsafe_allow_html=True)
-                st.slider("Redução de kWh/unidade (%)",0.0,30.0,key="sim_energy",step=.5)
-                st.caption("Impacto: custo de transformação / EBITDA · Confiança: Média")
-                st.markdown(
-                    "<div class='frontend-note'>O modelo usa o custo de energia real da base quando disponível. "
-                    "A evolução futura pode usar kWh/unidade equivalente por produto/linha.</div>",
-                    unsafe_allow_html=True
-                )
+                st.markdown("<div class='lever-kicker'>ENERGIA</div><div class='lever-title'>Intensidade energética da operação</div>",unsafe_allow_html=True)
+                target_input(f"Meta simulada — kWh/unidade ({B['energy_unit']})","energy_intensity",B["energy_intensity"],B["energy_unit"],.01,0,max(B["energy_intensity"]*2,2),"%.3f")
+                st.markdown("<div class='frontend-note'>O custo de energia acompanha o volume e a intensidade energética simulada. Retrabalho também afeta o consumo.</div>",unsafe_allow_html=True)
 
             elif group=="Logística":
-                st.markdown("<div class='lever-kicker'>LOGÍSTICA</div><div class='lever-title'>Custo de entrega e proteção de receita</div>",unsafe_allow_html=True)
+                st.markdown("<div class='lever-kicker'>LOGÍSTICA</div><div class='lever-title'>Frete em GGF e proteção de receita</div>",unsafe_allow_html=True)
                 a,b=st.columns(2,gap="medium")
                 with a:
-                    st.slider("Redução do frete/unidade (%)",0.0,20.0,key="sim_freight",step=.5)
-                    st.caption("Impacto: margem / EBITDA · Confiança: Alta")
+                    target_input("Meta simulada — Frete/unidade","freight_per_unit",B["freight_per_unit"],"R$/un",.01,0,max(1,B["freight_per_unit"]*3),"%.2f")
                 with b:
-                    st.slider("OTIF (%)",50.0,100.0,key="sim_otif",step=.5)
-                    st.caption("Impacto: receita protegida / pedidos · Confiança: Média")
-                st.markdown(
-                    "<div class='frontend-note'>OTIF não é tratado como receita automática. O motor estima receita em risco e reconhece apenas uma parcela conservadora do valor protegido.</div>",
-                    unsafe_allow_html=True
-                )
+                    target_input("Meta simulada — OTIF","otif",B["otif"],"%",.5,0,100,"%.1f")
+                st.markdown("<div class='frontend-note'><b>Frete:</b> entra em GGF na DRE Gerencial. <b>OTIF:</b> gera receita protegida / risco evitado e não é somado automaticamente à receita ou ao EBITDA.</div>",unsafe_allow_html=True)
 
             elif group=="Financeiro":
-                st.markdown("<div class='lever-kicker'>FINANCEIRO</div><div class='lever-title'>Preço, mix e volume vendido</div>",unsafe_allow_html=True)
+                st.markdown("<div class='lever-kicker'>FINANCEIRO</div><div class='lever-title'>Preço, mix e volume — cálculo encadeado</div>",unsafe_allow_html=True)
                 a,b=st.columns(2,gap="medium")
                 with a:
-                    st.slider("Variação do preço médio (%)",-10.0,15.0,key="sim_price",step=.5)
-                    st.caption("Impacto: receita / EBITDA · Confiança: Alta")
-                    st.slider("Variação do volume vendido (%)",-20.0,40.0,key="sim_volume",step=.5)
-                    st.caption("Impacto: receita / contribuição · limitado à capacidade")
+                    target_input("Meta simulada — Preço médio líquido","price_per_unit",B["price_per_unit"],"R$/un",.1,0,max(B["price_per_unit"]*3,1),"%.2f")
+                    target_input("Meta simulada — Volume vendido","volume_units",B["volume_units"],"un",100,0,max(B["volume_units"]*3,1000),"%.0f")
                 with b:
-                    st.slider("Efeito de mix na margem (pp)",-5.0,8.0,key="sim_mix",step=.1)
-                    st.caption("Impacto: margem / EBITDA · Confiança: Média")
-                    st.markdown(
-                        "<div class='frontend-note'>O volume vendido monetiza a capacidade criada pelas alavancas operacionais. "
-                        "Por isso, capacidade e volume não são somados como dois EBITDAs independentes.</div>",
-                        unsafe_allow_html=True
-                    )
+                    target_input("Meta simulada — Efeito de mix na margem","mix_pp",B["mix_pp"],"pp",.1,-20,20,"%.1f")
+                    st.markdown("<div class='frontend-note'><b>Regra:</b> Receita simulada = Volume simulado × Preço simulado. O efeito de preço incide sobre o volume do cenário, eliminando o erro de somar percentuais independentes sobre a mesma receita base.</div>",unsafe_allow_html=True)
 
             elif group=="Estrutura":
-                st.markdown("<div class='lever-kicker'>ESTRUTURA</div><div class='lever-title'>Custo fixo e contratos/serviços</div>",unsafe_allow_html=True)
+                st.markdown("<div class='lever-kicker'>ESTRUTURA</div><div class='lever-title'>Custos estruturais em valor absoluto</div>",unsafe_allow_html=True)
                 a,b=st.columns(2,gap="medium")
                 with a:
-                    st.slider("Redução de custo fixo (%)",0.0,20.0,key="sim_fixed",step=.5)
-                    st.caption("Impacto: EBITDA direto · Confiança: Alta")
+                    target_input("Meta simulada — Custos Fixos Industriais","fixed_industrial",B["fixed_industrial"],"R$",1000,0,max(B["fixed_industrial"]*3,1000),"%.0f")
                 with b:
-                    st.slider("Redução de contratos/serviços (%)",0.0,30.0,key="sim_contracts",step=.5)
-                    st.caption("Impacto: SG&A / custo fabril · Confiança: Alta")
-                st.markdown(
-                    "<div class='frontend-note'>Contratos/serviços são tratados como um subconjunto da estrutura. "
-                    "A redução de custo fixo é aplicada à parcela restante para evitar dupla contagem.</div>",
-                    unsafe_allow_html=True
-                )
+                    target_input("Meta simulada — GGF Contratos/Serviços","contracts_services",B["contracts_services"],"R$",1000,0,max(B["contracts_services"]*3,1000),"%.0f")
+                st.markdown("<div class='frontend-note'>Contratos/serviços ficam dentro de GGF. Custo fixo industrial é uma linha separada da DRE. Headcount não é somado duas vezes se a meta de custo fixo já incorporar esse efeito.</div>",unsafe_allow_html=True)
 
             elif group=="Capital":
-                st.markdown("<div class='lever-kicker'>CAPITAL</div><div class='lever-title'>Capital de giro e geração de caixa</div>",unsafe_allow_html=True)
+                st.markdown("<div class='lever-kicker'>CAPITAL</div><div class='lever-title'>Dias de capital de giro</div>",unsafe_allow_html=True)
                 a,b=st.columns(2,gap="medium")
                 with a:
-                    st.slider("Redução de estoque (dias)",0,45,key="sim_inventory",step=1)
-                    st.caption("Impacto: capital de giro / caixa · Confiança: Alta")
-                    st.slider("Redução do prazo cliente (dias)",0,30,key="sim_dso",step=1)
-                    st.caption("Impacto: caixa · Confiança: Alta")
+                    target_input("Meta simulada — Estoque","inventory_days",B["inventory_days"],"dias",1,0,365,"%.0f")
+                    target_input("Meta simulada — Prazo cliente","dso_days",B["dso_days"],"dias",1,0,365,"%.0f")
                 with b:
-                    st.slider("Aumento do prazo fornecedor (dias)",0,30,key="sim_dpo",step=1)
-                    st.caption("Impacto: caixa · Confiança: Alta")
-                    st.markdown(
-                        "<div class='frontend-note'>Capital de giro é exibido separado do EBITDA. "
-                        "Estoque usa custo diário; cliente usa receita diária; fornecedor usa compras/MP diária.</div>",
-                        unsafe_allow_html=True
-                    )
+                    target_input("Meta simulada — Prazo fornecedor","dpo_days",B["dpo_days"],"dias",1,0,365,"%.0f")
+                    st.markdown("<div class='frontend-note'>Capital de giro é calculado em caixa e permanece fora do EBITDA.</div>",unsafe_allow_html=True)
 
-    # ------------------------------------------------------------------
-    # Causal calculation engine — conservative / no double counting
-    # ------------------------------------------------------------------
-    # Process levers -> technical availability recovery
-    setup_red=max(0.0,(setup_base-st.session_state.sim_setup)/max(setup_base,1))
-    unplanned_red=max(0.0,st.session_state.sim_unplanned/100)
-    mttr_red=max(0.0,(mttr_base-st.session_state.sim_mttr)/max(mttr_base,1))
-    downtime_share=max(0.0,1-D["availability"])
-    process_recovery=downtime_share*(0.25*setup_red+0.45*unplanned_red+0.30*mttr_red)
-    derived_availability=min(0.99,D["availability"]+process_recovery)
+    targets={name:float(st.session_state[f"simt_{name}"]) for name in lever_names}
+    R=calculate_simulator_scenario(D,targets,st.session_state.sim_prod_mode)
 
-    if st.session_state.sim_prod_mode=="OEE direto":
-        oee_target=max(0.01,st.session_state.sim_oee/100)
-        process_oee=derived_availability*min(D["performance"],1.0)*D["quality"]
-        effective_oee=max(oee_target,process_oee)
-        efficiency_growth=max(0.0,safe_div(effective_oee,D["oee"])-1)
-        effective_availability=max(D["availability"],derived_availability)
-        effective_performance=D["performance"]
-    else:
-        manual_avail=st.session_state.sim_availability/100
-        effective_availability=max(manual_avail,derived_availability)
-        effective_performance=st.session_state.sim_performance/100
-        # Keep quality base here; scrap/rework value is monetized separately to avoid double count
-        effective_oee=effective_availability*min(effective_performance,1.0)*D["quality"]
-        efficiency_growth=max(0.0,safe_div(effective_oee,D["oee"])-1)
+    active_count=sum(1 for name in lever_names if abs(targets[name]-float(B[name]))>1e-8)
 
-    utilization_growth=max(0.0,safe_div(st.session_state.sim_capacity,capacity_base)-1)
-    output_potential_growth=max(0.0,(1+efficiency_growth)*(1+utilization_growth)-1)
-    capacity_revenue_potential=base_revenue*output_potential_growth
-    capacity_ebitda_potential=capacity_revenue_potential*base_margin
-
-    # Finance/demand: monetize only capacity that can be sold
-    requested_volume_growth=st.session_state.sim_volume/100
-    if requested_volume_growth>=0:
-        realized_volume_growth=min(requested_volume_growth,output_potential_growth if output_potential_growth>0 else requested_volume_growth)
-    else:
-        realized_volume_growth=requested_volume_growth
-    volume_revenue=base_revenue*realized_volume_growth
-    volume_ebitda=volume_revenue*base_margin
-
-    price_revenue=base_revenue*(st.session_state.sim_price/100)
-    price_ebitda=price_revenue  # price effect with constant unit variable cost
-    mix_ebitda=base_revenue*(st.session_state.sim_mix/100)
-
-    # Quality
-    scrap_reduction=max(0.0,(D["scrap"]*100-st.session_state.sim_scrap)/100)
-    scrap_saving=scrap_reduction*base_mp
-    rework_reduction=max(0.0,(rework_base-st.session_state.sim_rework)/100)
-    rework_cost_pool=base_mod+base_energy
-    rework_saving=rework_reduction*rework_cost_pool
-
-    # People
-    overtime_base_cost=max(0.0,D["overtime"]*30.0)
-    overtime_saving=overtime_base_cost*(st.session_state.sim_overtime/100)
-    prod_gain=max(0.0,safe_div(st.session_state.sim_productivity,base_productivity)-1)
-    productivity_saving=base_mod*prod_gain*0.45
-    headcount_effect=-st.session_state.sim_headcount*avg_monthly_person_cost  # negative HC => positive EBITDA
-
-    # Materials
-    mp_specific_reduction=max(0.0,(mp_specific_base-st.session_state.sim_mp_specific)/max(mp_specific_base,0.01))
-    mp_specific_saving=base_mp*mp_specific_reduction
-    mp_price_saving=base_mp*(st.session_state.sim_mp_price/100)
-    material_loss_pool=base_mp*0.04
-    material_loss_saving=material_loss_pool*(st.session_state.sim_material_loss/100)
-
-    # Energy / logistics
-    energy_saving=base_energy*(st.session_state.sim_energy/100)
-    freight_base=base_var*freight_share
-    freight_saving=freight_base*(st.session_state.sim_freight/100)
-
-    otif_gap=max(1.0,100-otif_base)
-    otif_improvement=max(0.0,st.session_state.sim_otif-otif_base)
-    protected_revenue=base_revenue*otif_risk_share*min(1.0,otif_improvement/otif_gap)
-    recognized_otif_revenue=protected_revenue*0.70
-    otif_ebitda=recognized_otif_revenue*base_margin
-
-    # Structure — contracts separated from remainder
-    contracts_base=base_fixed*contracts_share
-    fixed_ex_contracts=max(0.0,base_fixed-contracts_base)
-    contracts_saving=contracts_base*(st.session_state.sim_contracts/100)
-    fixed_saving=fixed_ex_contracts*(st.session_state.sim_fixed/100)
-
-    # Capital / cash
-    inventory_release=(base_var/period_days)*st.session_state.sim_inventory
-    supplier_release=(base_mp/period_days)*st.session_state.sim_dpo
-    customer_release=(base_revenue/period_days)*st.session_state.sim_dso
-    working_capital_release=inventory_release+supplier_release+customer_release
-
-    # Additive EBITDA — no duplicate capacity attribution
-    cost_savings=(
-        scrap_saving+rework_saving+overtime_saving+productivity_saving+headcount_effect+
-        mp_specific_saving+mp_price_saving+material_loss_saving+energy_saving+
-        freight_saving+contracts_saving+fixed_saving
-    )
-    revenue_add=volume_revenue+price_revenue+recognized_otif_revenue
-    ebitda_gain=volume_ebitda+price_ebitda+mix_ebitda+otif_ebitda+cost_savings
-    simulated_revenue=base_revenue+revenue_add
-    simulated_ebitda=base_ebitda+ebitda_gain
-    contribution_gain=(
-        volume_ebitda+price_ebitda+mix_ebitda+otif_ebitda+
-        scrap_saving+rework_saving+mp_specific_saving+mp_price_saving+
-        material_loss_saving+energy_saving+freight_saving
-    )
-    simulated_contribution=base_revenue*base_margin+contribution_gain
-    simulated_margin=safe_div(simulated_contribution,simulated_revenue)
-
-    # Simulated fixed-cost absorption: same fixed cost divided by higher sold output, net of explicit structural savings
-    base_fixed_per_unit=safe_div(base_fixed,D["actual"])
-    simulated_units=max(1,D["actual"]*(1+realized_volume_growth))
-    simulated_fixed_total=max(0,base_fixed-contracts_saving-fixed_saving)
-    simulated_fixed_per_unit=safe_div(simulated_fixed_total,simulated_units)
-    absorption_gain=max(0,base_fixed_per_unit-simulated_fixed_per_unit)
-
-    # ------------------------------------------------------------------
-    # Value attribution table
-    # Production/process levers = enabling value; additive lines = bridge value
-    # ------------------------------------------------------------------
-    enable_pool=capacity_ebitda_potential
-    enable_weights={}
-    if st.session_state.sim_prod_mode=="OEE direto":
-        enable_weights["OEE"]=max(0,efficiency_growth)
-    else:
-        avail_gain=max(0,effective_availability-D["availability"])
-        perf_gain=max(0,effective_performance-D["performance"])
-        enable_weights["Disponibilidade"]=avail_gain
-        enable_weights["Performance"]=perf_gain
-        # Attribute the process-derived part within availability
-        if process_recovery>0:
-            enable_weights["Setup médio"]=process_recovery*0.25*setup_red
-            enable_weights["Paradas não planejadas"]=process_recovery*0.45*unplanned_red
-            enable_weights["MTTR"]=process_recovery*0.30*mttr_red
-    enable_weights["Capacidade utilizada"]=max(0,utilization_growth)
-    total_enable_weight=sum(enable_weights.values()) or 1.0
-
-    breakdown=[]
-    for lever,w in enable_weights.items():
-        breakdown.append([lever,enable_pool*w/total_enable_weight,"Valor habilitado","Alta" if lever!="Capacidade utilizada" else "Média"])
-
-    additive_lines=[
-        ("Refugo",scrap_saving,"EBITDA","Alta"),
-        ("Retrabalho",rework_saving,"EBITDA","Alta"),
-        ("Horas extras",overtime_saving,"EBITDA","Alta"),
-        ("Produtividade",productivity_saving,"EBITDA","Alta"),
-        ("Headcount",headcount_effect,"EBITDA","Alta"),
-        ("Consumo específico MP",mp_specific_saving,"EBITDA","Alta"),
-        ("Preço de MP",mp_price_saving,"EBITDA","Alta"),
-        ("Perdas de material",material_loss_saving,"EBITDA","Alta"),
-        ("kWh/unidade",energy_saving,"EBITDA","Média"),
-        ("Frete/unidade",freight_saving,"EBITDA","Alta"),
-        ("OTIF",otif_ebitda,"EBITDA / Receita protegida","Média"),
-        ("Preço médio",price_ebitda,"EBITDA","Alta"),
-        ("Mix de produtos",mix_ebitda,"EBITDA","Média"),
-        ("Volume vendido",volume_ebitda,"EBITDA","Alta"),
-        ("Custo fixo",fixed_saving,"EBITDA","Alta"),
-        ("Contratos/serviços",contracts_saving,"EBITDA","Alta"),
-        ("Estoque",inventory_release,"Caixa","Alta"),
-        ("Prazo fornecedor",supplier_release,"Caixa","Alta"),
-        ("Prazo cliente",customer_release,"Caixa","Alta"),
-    ]
-    breakdown.extend(additive_lines)
-    breakdown_df=pd.DataFrame(breakdown,columns=["Alavanca","Impacto_R$","Tipo","Confiança"])
-    breakdown_df["AbsImpact"]=breakdown_df["Impacto_R$"].abs()
-    breakdown_df=breakdown_df.sort_values("AbsImpact",ascending=False).drop(columns=["AbsImpact"])
-
-    active_count=int((breakdown_df["Impacto_R$"].abs()>1).sum())
-
-    # ------------------------------------------------------------------
-    # Impact panel
-    # ------------------------------------------------------------------
     with right:
-        with st.container(border=True, height=585):
-            panel_title("Impacto do Cenário",f"{active_count} alavancas com efeito econômico no cenário")
+        with st.container(border=True):
+            panel_title("Impacto do Cenário",f"{active_count} alavancas alteradas em relação ao atual")
             c1,c2=st.columns(2,gap="small")
             with c1:
                 st.markdown(
                     f"<div class='sim-card'><div class='sim-card-label'>Receita simulada</div>"
-                    f"<div class='sim-card-value'>{fmt_money(simulated_revenue)}</div>"
-                    f"<div class='sim-card-delta' style='color:{GREEN if revenue_add>=0 else RED}'>Δ {fmt_money(revenue_add)}</div></div>",
+                    f"<div class='sim-card-value'>{fmt_money(R['simulated_revenue'])}</div>"
+                    f"<div class='sim-card-delta' style='color:{GREEN if R['revenue_gain']>=0 else RED}'>Δ {fmt_money(R['revenue_gain'])}</div></div>",
                     unsafe_allow_html=True
                 )
             with c2:
                 st.markdown(
                     f"<div class='sim-card'><div class='sim-card-label'>EBITDA simulado</div>"
-                    f"<div class='sim-card-value'>{fmt_money(simulated_ebitda)}</div>"
-                    f"<div class='sim-card-delta' style='color:{GREEN if ebitda_gain>=0 else RED}'>Δ {fmt_money(ebitda_gain)}</div></div>",
+                    f"<div class='sim-card-value'>{fmt_money(R['simulated_ebitda'])}</div>"
+                    f"<div class='sim-card-delta' style='color:{GREEN if R['ebitda_gain']>=0 else RED}'>Δ {fmt_money(R['ebitda_gain'])}</div></div>",
                     unsafe_allow_html=True
                 )
             st.write("")
             c1,c2=st.columns(2,gap="small")
             with c1:
                 st.markdown(
-                    f"<div class='sim-card'><div class='sim-card-label'>Margem estimada</div>"
-                    f"<div class='sim-card-value'>{fmt_pct(simulated_margin)}</div>"
-                    f"<div class='sim-card-delta' style='color:{GREEN if simulated_margin>=base_margin else RED}'>base {fmt_pct(base_margin)}</div></div>",
+                    f"<div class='sim-card'><div class='sim-card-label'>Margem Industrial</div>"
+                    f"<div class='sim-card-value'>{fmt_pct(R['simulated_margin'])}</div>"
+                    f"<div class='sim-card-delta' style='color:{GREEN if R['simulated_margin']>=D['margin'] else RED}'>base {fmt_pct(D['margin'])}</div></div>",
                     unsafe_allow_html=True
                 )
             with c2:
                 st.markdown(
-                    f"<div class='sim-card'><div class='sim-card-label'>Capital de giro liberado</div>"
-                    f"<div class='sim-card-value'>{fmt_money(working_capital_release)}</div>"
-                    f"<div class='sim-card-delta' style='color:{BLUE}'>efeito caixa</div></div>",
+                    f"<div class='sim-card'><div class='sim-card-label'>Capital de giro</div>"
+                    f"<div class='sim-card-value'>{fmt_money(R['working_capital_release'])}</div>"
+                    f"<div class='sim-card-delta' style='color:{BLUE}'>efeito caixa, fora EBITDA</div></div>",
                     unsafe_allow_html=True
                 )
-
             st.write("")
             st.markdown(
-                f"<div class='lever-shell'>"
-                f"<div class='lever-kicker'>CAPACIDADE</div>"
-                f"<div class='lever-title'>Valor potencial habilitado: {fmt_money(capacity_ebitda_potential)}</div>"
-                f"<div class='lever-meta'>OEE efetivo {effective_oee:.1%} · utilização {st.session_state.sim_capacity:.1f}% · "
-                f"potencial de volume {output_potential_growth:.1%}. Esse valor não é somado novamente ao EBITDA se o volume vendido já o monetiza.</div>"
-                f"</div>",
+                f"<div class='lever-shell'><div class='lever-kicker'>OTIF</div>"
+                f"<div class='lever-title'>{'Receita protegida' if R['otif_protected_value']>=0 else 'Receita adicional em risco'}: {fmt_money(abs(R['otif_protected_value']))}</div>"
+                f"<div class='lever-meta'>Não entra automaticamente na Receita simulada ou EBITDA. Confiança: Média.</div></div>",
                 unsafe_allow_html=True
             )
             st.write("")
+            volume_note=""
+            if R["requested_volume"]>R["realized_volume"]+1:
+                volume_note=f" · demanda solicitada limitada pela capacidade a {R['realized_volume']:,.0f} un".replace(",",".")
             st.markdown(
-                f"<div class='lever-shell'>"
-                f"<div class='lever-kicker'>ABSORÇÃO</div>"
-                f"<div class='lever-title'>Custo fixo/un: {fmt_money(base_fixed_per_unit,2)} → {fmt_money(simulated_fixed_per_unit,2)}</div>"
-                f"<div class='lever-meta'>Ganho de absorção: {fmt_money(absorption_gain,2)}/un. A utilização maior não reduz o custo fixo total por si só.</div>"
-                f"</div>",
+                f"<div class='lever-shell'><div class='lever-kicker'>CAPACIDADE</div>"
+                f"<div class='lever-title'>Valor potencial habilitado: {fmt_money(R['capacity_value'])}</div>"
+                f"<div class='lever-meta'>OEE efetivo {R['effective_oee']:.1%} · potencial {R['potential_units']:,.0f} un{volume_note}. "
+                f"Capacidade não é somada novamente ao EBITDA.</div></div>".replace(",","."),
                 unsafe_allow_html=True
             )
 
-    # ------------------------------------------------------------------
-    # Bridge + value map
-    # ------------------------------------------------------------------
     st.write("")
     c1,c2=st.columns([1.08,.92],gap="small")
     with c1:
-        with st.container(border=True, height=410):
-            panel_title("Bridge de EBITDA","Somente impactos aditivos — sem dupla contagem")
-            bridge={
-                "Volume vendido":volume_ebitda,
-                "Preço":price_ebitda,
-                "Mix":mix_ebitda,
-                "Qualidade":scrap_saving+rework_saving,
-                "Pessoas":overtime_saving+productivity_saving+headcount_effect,
-                "Materiais":mp_specific_saving+mp_price_saving+material_loss_saving,
-                "Energia/Logística":energy_saving+freight_saving+otif_ebitda,
-                "Estrutura":fixed_saving+contracts_saving,
-            }
-            bridge={k:v for k,v in bridge.items() if abs(v)>1}
-            x=["EBITDA Atual"]+list(bridge.keys())+["EBITDA Simulado"]
-            measures=["absolute"]+["relative"]*len(bridge)+["total"]
-            y=[base_ebitda]+list(bridge.values())+[0]
-            fig=go.Figure(go.Waterfall(
-                x=x,measure=measures,y=y,
-                increasing={"marker":{"color":GREEN}},
-                decreasing={"marker":{"color":RED}},
-                totals={"marker":{"color":BLUE}},
-                connector={"line":{"color":"#BBC8D3","width":1}}
-            ))
-            fig.update_layout(
-                height=335,margin=dict(l=5,r=5,t=10,b=55),
-                paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="rgba(0,0,0,0)",
-                yaxis=dict(gridcolor="#EFF3F7",tickfont=dict(size=9)),
-                xaxis=dict(tickfont=dict(size=9),tickangle=-20,automargin=True),
-                showlegend=False
-            )
-            st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
+        with st.container(border=True):
+            panel_title("Bridge de EBITDA","Reconciliado com a DRE simulada")
+            bridge=R["bridge"]
+            if bridge:
+                x=["EBITDA Atual"]+list(bridge.keys())+["EBITDA Simulado"]
+                measures=["absolute"]+["relative"]*len(bridge)+["total"]
+                y=[D["ebitda"]]+list(bridge.values())+[0]
+                fig=go.Figure(go.Waterfall(
+                    x=x,measure=measures,y=y,
+                    increasing={"marker":{"color":GREEN}},
+                    decreasing={"marker":{"color":RED}},
+                    totals={"marker":{"color":BLUE}},
+                    connector={"line":{"color":"#BBC8D3","width":1}}
+                ))
+                fig.update_layout(
+                    height=385,margin=dict(l=5,r=5,t=10,b=80),
+                    paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="rgba(0,0,0,0)",
+                    yaxis=dict(gridcolor="#EFF3F7",tickfont=dict(size=9)),
+                    xaxis=dict(tickfont=dict(size=9),tickangle=-25,automargin=True),
+                    showlegend=False
+                )
+                st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
+            else:
+                st.info("O cenário está igual ao atual.")
 
     with c2:
-        with st.container(border=True, height=410):
+        with st.container(border=True):
             panel_title("Mapa de Valor","Impacto por alavanca e natureza do valor")
-            show=breakdown_df[breakdown_df["Impacto_R$"].abs()>1].head(10).copy()
-            show["Impacto"]=show["Impacto_R$"].map(lambda x:fmt_money(x))
-            show=show[["Alavanca","Tipo","Impacto","Confiança"]]
-            st.dataframe(
-                show,use_container_width=True,hide_index=True,height=335,
-                column_config={
-                    "Alavanca":st.column_config.TextColumn("Alavanca",width="medium"),
-                    "Tipo":st.column_config.TextColumn("Natureza",width="medium"),
-                    "Impacto":st.column_config.TextColumn("Impacto",width="medium"),
-                    "Confiança":st.column_config.TextColumn("Confiança",width="small"),
-                }
-            )
+            show=R["breakdown"].copy()
+            if not show.empty:
+                show=show[show["Impacto_R$"].abs()>0.5].head(12)
+                show["Impacto"]=show["Impacto_R$"].map(lambda x:fmt_money(x))
+                show=show[["Alavanca","Tipo","Impacto","Confiança"]]
+                st.dataframe(show,use_container_width=True,hide_index=True,height=385)
+            else:
+                st.info("Nenhuma alavanca alterada.")
 
     st.write("")
     with st.container(border=True):
-        c1,c2=st.columns([1,.33],gap="small")
+        panel_title("DRE — Base x Simulado","O cenário conversa diretamente com a DRE Gerencial")
+        dre_sim=R["simulated_dre"].copy()
+        dre_sim["Δ"]=dre_sim["Simulado"]-dre_sim["Base"]
+        for col in ["Base","Simulado","Δ"]:
+            dre_sim[col]=dre_sim[col].map(lambda x:fmt_money(x))
+        st.dataframe(dre_sim,use_container_width=True,hide_index=True,height=500)
+
+    st.write("")
+    with st.container(border=True):
+        c1,c2=st.columns([1,.34],gap="small")
         with c1:
             st.markdown(
-                "<div class='frontend-note'><b>Regra do motor:</b> capacidade operacional pode habilitar receita, mas só entra no EBITDA quando existe volume vendido para monetizá-la. "
-                "OEE não é somado com seus drivers; setup/paradas/MTTR alimentam disponibilidade; contratos são separados do restante do custo fixo; capital de giro fica fora do EBITDA.</div>",
+                "<div class='frontend-note'><b>Regras do motor:</b> preço e volume são encadeados; frete está em GGF; "
+                "OTIF é receita protegida; custos e despesas vêm da DRE gerencial; OEE/capacidade são habilitadores; "
+                "capital de giro fica fora do EBITDA; Atual → Meta é a única forma de entrada do cenário.</div>",
                 unsafe_allow_html=True
             )
         with c2:
             if st.button("Transformar cenário em Plano de Captura",type="primary",use_container_width=True):
-                top_actions=breakdown_df[
-                    (breakdown_df["Impacto_R$"]>1) &
-                    (breakdown_df["Tipo"].str.contains("EBITDA|Valor habilitado",regex=True))
-                ].head(5)
+                bd=R["breakdown"].copy()
+                if not bd.empty:
+                    top_actions=bd[
+                        (bd["Impacto_R$"]>1) &
+                        (bd["Tipo"].str.contains("EBITDA|Valor habilitado|GGF",regex=True))
+                    ].head(5)
+                else:
+                    top_actions=pd.DataFrame()
 
                 owner_map={
                     "OEE":"Ger. Industrial","Disponibilidade":"Ger. Manutenção","Performance":"Ger. Produção",
@@ -3046,52 +3350,52 @@ elif page == "Alavancas de Valor":
                     "Paradas não planejadas":"Ger. Manutenção","MTTR":"Ger. Manutenção",
                     "Refugo":"Ger. Qualidade","Retrabalho":"Ger. Qualidade",
                     "Horas extras":"Ger. Produção","Produtividade":"Ger. Produção","Headcount":"Ger. Industrial",
-                    "Consumo específico MP":"Engenharia de Processos","Preço de MP":"Controller / Operações",
+                    "Consumo específico MP":"Engenharia de Processos","Preço de MP":"Suprimentos",
                     "Perdas de material":"Ger. Qualidade","kWh/unidade":"Ger. Industrial",
-                    "Frete/unidade":"Controller / Operações","OTIF":"Ger. Produção",
-                    "Preço médio":"Controller / Operações","Mix de produtos":"Controller / Operações",
-                    "Volume vendido":"Ger. Industrial","Custo fixo":"Controller / Operações",
-                    "Contratos/serviços":"Controller / Operações"
+                    "Frete/unidade":"Logística / Suprimentos","OTIF":"PCP / Logística",
+                    "Preço médio":"Comercial / CFO","Mix de produtos":"Comercial / CFO",
+                    "Volume vendido":"Comercial / Industrial","Custo fixo":"Diretor Industrial / CFO",
+                    "Contratos/serviços":"Suprimentos / CFO"
                 }
                 action_map={
-                    "OEE":"Executar plano para atingir o OEE simulado, detalhando perdas de disponibilidade, performance e qualidade.",
-                    "Disponibilidade":"Atacar as maiores perdas de disponibilidade e equipamentos críticos.",
+                    "OEE":"Executar plano para atingir a meta de OEE simulada.",
+                    "Disponibilidade":"Atacar perdas de disponibilidade e equipamentos críticos.",
                     "Performance":"Eliminar perdas de velocidade e microparadas versus padrão.",
-                    "Capacidade utilizada":"Converter capacidade disponível em volume vendável sem aumentar estrutura fixa.",
-                    "Setup médio":"Aplicar SMED e preparação externa nos setups prioritários.",
-                    "Paradas não planejadas":"Plano de confiabilidade para reduzir paradas não planejadas.",
-                    "MTTR":"Reduzir tempo de reparo com padrão de atendimento, sobressalentes e troubleshooting.",
-                    "Refugo":"Pareto de refugo por produto/causa e ajuste de parâmetros de processo.",
-                    "Retrabalho":"Eliminar causas de retrabalho e recuperar MOD/energia/capacidade.",
-                    "Horas extras":"Rebalancear escala e capacidade para reduzir hora extra sem perder volume.",
-                    "Produtividade":"Atacar perdas de HH usando produtividade linearizada pelo mix.",
-                    "Headcount":"Revisar dimensionamento e capacidade antes de qualquer alteração de quadro.",
-                    "Consumo específico MP":"Comparar consumo real x padrão e atacar sobreconsumo por SKU/processo.",
-                    "Preço de MP":"Executar sourcing/negociação para capturar redução de preço de matéria-prima.",
-                    "Perdas de material":"Reduzir perdas de processo fora do refugo já contabilizado.",
-                    "kWh/unidade":"Atacar consumo específico de energia por linha/produto.",
-                    "Frete/unidade":"Rever malha, ocupação, frequência e contratação para reduzir frete/unidade.",
-                    "OTIF":"Atacar restrições de PCP, material e expedição que comprometem entrega.",
-                    "Preço médio":"Executar plano de preço preservando elasticidade e volume.",
-                    "Mix de produtos":"Aumentar participação de produtos/famílias de maior margem.",
-                    "Volume vendido":"Converter capacidade em vendas adicionais respeitando demanda e margem.",
-                    "Custo fixo":"Revisar estrutura e capacidade ociosa para capturar redução sustentável.",
-                    "Contratos/serviços":"Renegociar, redimensionar ou eliminar contratos sem retorno adequado."
+                    "Capacidade utilizada":"Converter capacidade disponível em volume vendável sem aumentar estrutura desnecessária.",
+                    "Setup médio":"Aplicar SMED e preparação externa para atingir o setup meta.",
+                    "Paradas não planejadas":"Reduzir horas de paradas não planejadas com plano de confiabilidade.",
+                    "MTTR":"Reduzir tempo médio de reparo nas falhas críticas.",
+                    "Refugo":"Atacar causas de refugo até a meta simulada.",
+                    "Retrabalho":"Eliminar causas de retrabalho e estabilizar o processo.",
+                    "Horas extras":"Redimensionar escala e gargalos para atingir a meta de horas extras.",
+                    "Produtividade":"Rebalancear operação usando HH padrão e mix de produtos.",
+                    "Headcount":"Redesenhar capacidade e estrutura para o headcount simulado.",
+                    "Consumo específico MP":"Reduzir consumo real por unidade versus padrão.",
+                    "Preço de MP":"Renegociar/compor sourcing para atingir o preço-meta de insumo.",
+                    "Perdas de material":"Atacar perdas físicas fora do refugo de produto.",
+                    "kWh/unidade":"Reduzir intensidade energética por unidade.",
+                    "Frete/unidade":"Redesenhar malha/contratação para atingir o frete por unidade meta.",
+                    "Preço médio":"Executar estratégia comercial compatível com o preço médio meta.",
+                    "Mix de produtos":"Alterar mix para capturar a margem incremental simulada.",
+                    "Volume vendido":"Conectar capacidade disponível à demanda e ao volume vendido meta.",
+                    "Custo fixo":"Executar plano estrutural para atingir o custo fixo industrial meta.",
+                    "Contratos/serviços":"Revisar contratos e serviços classificados em GGF."
                 }
-                rows=[]
+                new_rows=[]
                 for _,r in top_actions.iterrows():
-                    lever=r["Alavanca"]
-                    owner=owner_map.get(lever,"Ger. Industrial")
-                    rows.append([
-                        "Alta" if r["Impacto_R$"]>=top_actions["Impacto_R$"].median() else "Média",
-                        f"Cenário: {lever}",
-                        action_map.get(lever,f"Executar plano de captura da alavanca {lever}."),
-                        owner,owner_email(owner),"45 dias",fmt_money(r["Impacto_R$"]),"Planejado"
+                    lever=str(r["Alavanca"])
+                    owner=owner_map.get(lever,"Gestão")
+                    new_rows.append([
+                        "Alta" if float(r["Impacto_R$"])>=100000 else "Média",
+                        lever,action_map.get(lever,f"Executar plano para atingir a meta simulada de {lever}."),
+                        owner,owner_email(owner),"30 dias",fmt_money(float(r["Impacto_R$"])),"Não iniciado"
                     ])
-                if rows:
-                    new_actions=pd.DataFrame(rows,columns=st.session_state.actions.columns)
-                    st.session_state.actions=pd.concat([st.session_state.actions,new_actions],ignore_index=True)
-                nav("Plano de Ação")
+                if new_rows:
+                    new=pd.DataFrame(new_rows,columns=st.session_state.actions.columns)
+                    st.session_state.actions=pd.concat([st.session_state.actions,new],ignore_index=True)
+                    nav("Plano de Ação")
+                else:
+                    st.warning("Altere pelo menos uma alavanca com impacto econômico antes de criar o plano.")
 
 
 elif page == "Plano de Ação":
@@ -3182,7 +3486,7 @@ elif page == "Agente de Performance":
         <div class="agent-title">Resumo do período</div>
         <div class="agent-copy">
         Produção em <b>{D["attainment"]:.1%}</b> do plano, OEE em <b>{D["oee"]:.1%}</b>,
-        refugo em <b>{D["scrap"]:.1%}</b> e margem de contribuição em <b>{D["margin"]:.1%}</b>.
+        refugo em <b>{D["scrap"]:.1%}</b> e margem industrial em <b>{D["margin"]:.1%}</b>.
         </div>
       </div>
       <div>
@@ -3221,7 +3525,7 @@ Plano: {D["planned"]:,.0f} un
 Atingimento: {D["attainment"]:.1%}
 OEE: {D["oee"]:.1%}
 Refugo: {D["scrap"]:.1%}
-Margem de contribuição: {D["margin"]:.1%}
+Margem industrial: {D["margin"]:.1%}
 EBITDA industrial: {fmt_money(D["ebitda"])}
 
 Prioridades:
